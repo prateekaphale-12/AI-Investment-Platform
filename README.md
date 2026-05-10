@@ -6,49 +6,120 @@ Multi-agent **decision-support** research: deterministic market data + technical
 
 | Area | Status |
 |------|--------|
-| **Backend (Phase 1)** | FastAPI, SQLite (`analysis_sessions`, `agent_progress`, `watchlist`, `stock_cache`), Pydantic models, async background analysis |
+| **Backend** | FastAPI, async jobs, logging, optional **Redis** cache, **SQLite** (default local) or **PostgreSQL** (Docker / `DATABASE_URL`) |
+| **Auth** | Register / login, **JWT**; analyses and watchlist are **per user**; list / delete analyses; **PDF export** |
 | **Agents** | 8-node LangGraph: Planner → Market → Financial → Technical → News Sentiment → Risk → Portfolio Allocation → Report |
-| **API** | `POST /api/v1/analyze`, `GET .../status`, `GET .../results`, `GET .../report`, `GET /api/v1/stocks/{ticker}/price`, watchlist + health |
-| **Frontend (Phase 2)** | Vite + React + TypeScript + Tailwind: query form, status polling, pie + line charts (Recharts), markdown report, expandable “Why this stock?”, watchlist |
-| **Docker (Phase 3)** | `docker-compose.yml`: backend (Python 3.12), frontend (nginx + `/api` proxy to backend) |
-| **Quality gate (Next Step)** | Backend `pytest` tests + GitHub Actions CI (backend tests + frontend build) |
+| **API** | Analysis (`/analyze`, status, results, report, history, delete, PDF), watchlist, **daily market snapshot**, stock prices, health / capabilities |
+| **Frontend** | Vite + React + TypeScript + Tailwind: auth UI, dashboard, charts, markdown report, watchlist, homepage **daily picks / movers** |
+| **Docker** | `docker-compose.yml`: Postgres, Redis, backend (Python 3.12), frontend (nginx + `/api` → backend) |
+| **CI** | GitHub Actions: backend tests, frontend build |
 
-See `ARCHITECTURE.md` and `IMPLEMENTATION_PLAN.md` for full product design and roadmap.
+See `ARCHITECTURE.md` and `IMPLEMENTATION_PLAN.md` for design detail and roadmap.
 
 ## Prerequisites
 
-- **Python 3.12 or 3.13** recommended for local dev (Docker uses 3.12). On **Python 3.14+**, install deps manually if a wheel fails; prefer Docker or 3.12/3.13.
+- **Python 3.12 or 3.13** recommended for local dev (Docker uses 3.12). On **Python 3.14+**, pip may lack wheels for some packages; prefer Docker or **3.12/3.13**.
 - **Node 20+** for the frontend.
-- **Gemini API key** (optional but recommended for polished narratives): [Google AI Studio](https://aistudio.google.com/app/apikey).  
-  The backend uses the official **`google-genai`** SDK (not the deprecated `google-generativeai` package).
-- **Docker** (optional, recommended for easiest setup):
-  - Windows/macOS: Docker Desktop
-  - Linux: Docker Engine + Compose plugin
+- **Gemini API key** (optional; improves narrative text): [Google AI Studio](https://aistudio.google.com/app/apikey).  
+  Backend uses **`google-genai`** (not the deprecated `google-generativeai` package).
 
-**Security:** never commit API keys, and never paste them into public chats or tickets. Keep them in `backend/.env` (gitignored) or your secret manager. If a key is exposed, revoke it in AI Studio and create a new one.
+**Docker (optional but simplest for Postgres + Redis + full stack)**
 
-## Clone and branch
+- Windows / macOS: Docker Desktop  
+- Linux: Docker Engine + Compose plugin
+
+**Security**
+
+- Never commit real API keys or production passwords. Copy `backend/.env.example` → `backend/.env` (gitignored) and fill secrets there.
+- The sample `docker-compose.yml` passwords are **for local development only**. Change them before any shared or production deployment.
+- **`JWT_SECRET_KEY`**: use a long random string in `.env`; do not ship the default beyond local experiments.
+
+---
+
+## Clone the repository
 
 ```cmd
 git clone https://github.com/prateekaphale-12/AI-Investment-Platform.git
 cd AI-Investment-Platform
-git checkout feature/hybrid-8-agent-ai
 ```
 
-## Run option A: Local (no Docker)
+Use `main`, or checkout a feature branch if the README directs you there.
+
+---
+
+## Quick start (Docker — recommended)
+
+Brings up **PostgreSQL**, **Redis**, backend, and frontend with one command.
+
+### 1) Environment
+
+Docker Compose reads a **repo root** `.env` file for substitutions (tracked template: `.env.example`):
+
+```cmd
+copy .env.example .env
+```
+
+Edit `.env` and set **`GEMINI_API_KEY`**. Optionally set **`GEMINI_MODEL`**.
+
+Alternatively, set variables in your shell before `docker compose up` (Unix: `export GEMINI_API_KEY=…`).
+
+### 2) Start
+
+```cmd
+docker compose up --build
+```
+
+- **App UI (nginx + API proxy):** [http://localhost:3000](http://localhost:3000)
+- **Backend API only:** [http://localhost:8000](http://localhost:8000) — Swagger: [/docs](http://localhost:8000/docs)
+- **Postgres:** host `localhost`, port **`5433`** (mapped from container `5432`)
+- **Redis:** host `localhost`, port **`6379`**
+
+The backend container uses Postgres via `DATABASE_URL` and Redis for caching (Compose sets both).
+
+### 3) Useful commands
+
+```cmd
+docker compose up -d --build
+docker compose logs -f backend
+docker compose down
+docker compose down -v
+```
+
+`down -v` removes named volumes (**wipes Postgres/Redis/backend app data**).
+
+---
+
+## Quick start (local — no Docker)
 
 ### Backend
 
 ```cmd
 cd backend
 copy .env.example .env
-# Edit .env: set GEMINI_API_KEY and optionally GEMINI_MODEL, CORS_ORIGINS
+```
+
+Edit `backend/.env` at minimum:
+
+| Variable | Purpose |
+|----------|---------|
+| `GEMINI_API_KEY` | Optional; Gemini narratives when set |
+| `JWT_SECRET_KEY` | **Required beyond toy use** — random secret for signing JWTs |
+| `CORS_ORIGINS` | Frontend origins (default includes Vite `5173` and Docker UI `3000`) |
+| `DATABASE_PATH` | SQLite file (relative to **`backend`** cwd); default `data/app.db` |
+| `DATABASE_URL` | Leave **empty** for SQLite. Set to a Postgres URL to use Postgres locally |
+| `REDIS_URL` | Default `redis://localhost:6379/0`. If Redis is not running, the app still starts; cache calls no-op gracefully |
+
+Install and run:
+
+```cmd
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- API: `http://localhost:8000` — OpenAPI: `/docs`
-- SQLite DB path: `backend/data/app.db` (created on startup)
+- API: [http://localhost:8000](http://localhost:8000) — OpenAPI: [/docs](http://localhost:8000/docs)
+- SQLite file: `backend\data\app.db` (created on startup)
+
+**Optional Redis (local):** install Redis locally or run `docker compose up -d redis` from the repo root and keep `REDIS_URL` pointing at `localhost:6379`.
 
 ### Frontend
 
@@ -58,112 +129,109 @@ npm install
 npm run dev
 ```
 
-- UI: `http://localhost:5173` — Vite proxies `/api` to port `8000`.
+- UI: [http://localhost:5173](http://localhost:5173) — dev server proxies `/api` → `http://localhost:8000`.
 
-### Smoke test
+### Typical user flow after clone
+
+1. Start **backend**, then **frontend** (or use Docker UI on `:3000`).
+2. Open the app → **Register** or **Login** (JWT is stored in the browser).
+3. Submit an analysis request; poll status until completed; open results / report / export PDF from the UI.
+4. Homepage loads **today’s snapshot** when the backend is up (`GET /api/v1/market/daily-snapshot`).
+
+---
+
+## API overview
+
+All routes are prefixed with **`/api`**.
+
+### Public / no auth
+
+| Method | Path | Notes |
+|--------|------|--------|
+| GET | `/v1/health` | Liveness |
+| GET | `/v1/capabilities` | Gemini configured flag |
+| GET | `/v1/market/daily-snapshot` | Daily picks / movers (generated on startup schedule + refreshed periodically) |
+
+### Auth
+
+| Method | Path | Notes |
+|--------|------|--------|
+| POST | `/v1/auth/register` | JSON: `email`, `password` (min 8 chars); returns **`access_token`** |
+| POST | `/v1/auth/login` | Same shape; returns token |
+| GET | `/v1/auth/me` | Header: `Authorization: Bearer <token>` |
+
+### Protected (Bearer JWT)
+
+| Area | Paths |
+|------|--------|
+| Analysis | `POST /v1/analyze`, `GET /v1/analysis`, `GET /v1/analysis/{session_id}/status`, `/results`, `/report`, `DELETE /v1/analysis/{session_id}`, `GET …/export/pdf` |
+| Watchlist | `GET /v1/watchlist`, `POST /v1/watchlist`, `DELETE /v1/watchlist/{ticker}` |
+| Stock | `GET /v1/stocks/{ticker}/price` |
+
+Use **Swagger** at `/docs`: click **Authorize**, enter `Bearer <your_token>`.
+
+### Example (register + analyze) — CMD
+
+Adjust email/password and JSON body as needed.
 
 ```cmd
-curl -X POST http://localhost:8000/api/v1/analyze -H "Content-Type: application/json" -d "{\"budget\":50000,\"risk_tolerance\":\"medium\",\"investment_horizon\":\"1y\",\"interests\":[\"Technology\"],\"goal\":\"growth\"}"
+curl -X POST http://localhost:8000/api/v1/auth/register -H "Content-Type: application/json" -d "{\"email\":\"you@example.com\",\"password\":\"longpassword123\"}"
 ```
 
-Then poll `GET /api/v1/analysis/{session_id}/status` until `completed`, then `GET /api/v1/analysis/{session_id}/results`.
-
-## Run option B: Docker (recommended)
-
-### 1) Install/verify Docker
+Copy `access_token` from the JSON response, then:
 
 ```cmd
-docker --version
-docker compose version
+curl -X POST http://localhost:8000/api/v1/analyze -H "Content-Type: application/json" -H "Authorization: Bearer PASTE_TOKEN_HERE" -d "{\"budget\":50000,\"risk_tolerance\":\"medium\",\"investment_horizon\":\"1y\",\"interests\":[\"Technology\"],\"goal\":\"growth\"}"
 ```
 
-If these fail, install Docker Desktop (Windows/macOS) or Docker Engine + Compose plugin (Linux), then retry.
+Poll `GET /api/v1/analysis/<session_id>/status` until `completed`, then `GET /api/v1/analysis/<session_id>/results`.
 
-### 2) Start stack
+---
 
-From the repo root (set `GEMINI_API_KEY` in your shell or a `.env` file next to `docker-compose.yml`):
+## Tests (backend)
 
-```cmd
-set GEMINI_API_KEY=your-key
-docker compose up --build
-```
-
-- Frontend + API through nginx: `http://localhost:3000` (browser calls `/api/...`, nginx proxies to the backend).
-- Backend directly: `http://localhost:8000`.
-
-### 3) Useful Docker commands
-
-```cmd
-# detached mode
-docker compose up -d --build
-
-# logs
-docker compose logs -f
-
-# stop
-docker compose down
-
-# stop + remove DB volume (clean slate)
-docker compose down -v
-```
-
-## Verify end-to-end quickly
-
-### Health check
-```cmd
-curl http://localhost:8000/api/v1/health
-```
-
-### Capabilities check (Gemini configured?)
-```cmd
-curl http://localhost:8000/api/v1/capabilities
-```
-
-### Analyze request
-```cmd
-curl -X POST http://localhost:8000/api/v1/analyze -H "Content-Type: application/json" -d "{\"budget\":50000,\"risk_tolerance\":\"medium\",\"investment_horizon\":\"1y\",\"interests\":[\"Technology\",\"Semiconductors\"],\"goal\":\"growth\"}"
-```
-
-Take returned `session_id`, then:
-```cmd
-curl http://localhost:8000/api/v1/analysis/<session_id>/status
-curl http://localhost:8000/api/v1/analysis/<session_id>/results
-```
-
-## Tests
+From the **`backend`** directory the test package resolves as **`app`**:
 
 ```cmd
 cd backend
+set PYTHONPATH=%CD%
 python -m pytest -q
 ```
 
-Current coverage includes core deterministic logic:
-- indicator computation shape and empty-input handling
-- portfolio allocation math (percent/amount totals and summary behavior)
-- API happy-path + not-found behavior for analysis endpoints
+(PowerShell: `$env:PYTHONPATH=(Get-Location).Path`)
+
+Coverage includes indicators, portfolio math, and authenticated API flows (with mocks).
+
+---
+
+## Without `GEMINI_API_KEY`
+
+You still get **live market data** (subject to **yfinance** limits), **indicators**, **allocations**, **charts**, deterministic rationale fields, **auth**, and **daily snapshot** widgets. Gemini-heavy text falls back gracefully.
+
+---
+
+## Troubleshooting
+
+| Issue | What to try |
+|--------|-------------|
+| **401 on `/analyze`** | Register or login first; send `Authorization: Bearer …` |
+| **Port already in use** | Change host port in the run command / `docker-compose.yml` |
+| **Frontend cannot reach API** | Local: backend on `:8000`, Vite proxy. Docker: use `:3000` so nginx proxies `/api` |
+| **`gemini_configured: false`** | Set `GEMINI_API_KEY`, restart backend |
+| **SQLite “no such column” on very old DBs** | Current `init_db` upgrades schema in-place; if something is still wedged, stop backend, rename/delete `backend\data\app.db`, restart (data loss). |
+| **Startup stays on “Waiting for application startup…”** | The first daily market snapshot runs in the **background** after DB init so the API can bind immediately; it may still be fetching Yahoo data via yfinance for a minute or two. |
+| **Python 3.14 pip errors** | Use Python **3.12/3.13** or Docker |
+| **`git commit` fails (identity)** | Configure `git config user.name` and `user.email` (globally or in repo) |
+
+---
 
 ## Important disclaimers
 
 - Outputs are **research and education only**, not investment, tax, or legal advice.
-- “Expected return” and similar fields are **heuristic / momentum-style proxies**, not forecasts.
-- Market data depends on **yfinance**; availability and rate limits apply.
+- “Expected return” and similar labels are **heuristic / momentum-style proxies**, not forecasts.
+- Market data depends on **third-party sources** (e.g. yfinance); outages and delays are possible.
 
-## Without `GEMINI_API_KEY`
-
-You still get **real market data**, **technical indicators**, **rule-based allocations**, **charts**, and deterministic rationale fields. Gemini-enhanced narrative/commentary degrades gracefully to fallback mode.
-
-## Troubleshooting
-
-- **Port already in use**
-  - Change port in run command or stop conflicting process.
-- **Frontend cannot reach backend**
-  - Local mode: ensure backend running on `8000`.
-  - Docker mode: use `http://localhost:3000` (nginx proxies `/api`).
-- **Gemini not being used**
-  - Check `GET /api/v1/capabilities` → `gemini_configured: true`.
-  - Ensure `backend/.env` has valid `GEMINI_API_KEY`, then restart backend.
-- **Python 3.14 dependency issues**
-  - Prefer Docker or Python 3.12/3.13 for local development.
+---
 
 ## License
 
