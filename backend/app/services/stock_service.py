@@ -10,6 +10,8 @@ import pandas as pd
 import yfinance as yf
 from loguru import logger
 
+from app.services.redis_service import cache_get_json, cache_set_json
+
 CACHE_TTL = timedelta(hours=1)
 
 
@@ -53,6 +55,10 @@ def _yf_info_sync(ticker: str) -> dict[str, Any]:
 
 async def fetch_price_history(db: aiosqlite.Connection | None, ticker: str, period: str = "1y") -> pd.DataFrame:
     ticker = ticker.upper()
+    redis_key = f"stock:{ticker}:price:{period}"
+    redis_cached = await cache_get_json(redis_key)
+    if redis_cached and redis_cached.get("records"):
+        return pd.DataFrame(redis_cached["records"])
     cached: dict[str, Any] | None = None
     if db:
         cached = await _cache_get(db, ticker, "price_" + period)
@@ -85,6 +91,7 @@ async def fetch_price_history(db: aiosqlite.Connection | None, ticker: str, peri
                 records.append(rec)
             if db:
                 await _cache_set(db, ticker, "price_" + period, {"records": records})
+            await cache_set_json(redis_key, {"records": records}, ttl_seconds=3600)
     except Exception as e:
         logger.exception("fetch_price_history {}: {}", ticker, e)
         raise
@@ -93,6 +100,10 @@ async def fetch_price_history(db: aiosqlite.Connection | None, ticker: str, peri
 
 async def fetch_stock_info(db: aiosqlite.Connection | None, ticker: str) -> dict[str, Any]:
     ticker = ticker.upper()
+    redis_key = f"stock:{ticker}:info"
+    redis_hit = await cache_get_json(redis_key)
+    if redis_hit:
+        return redis_hit
     if db:
         hit = await _cache_get(db, ticker, "info")
         if hit:
@@ -114,6 +125,7 @@ async def fetch_stock_info(db: aiosqlite.Connection | None, ticker: str) -> dict
     }
     if db:
         await _cache_set(db, ticker, "info", simplified)
+    await cache_set_json(redis_key, simplified, ttl_seconds=3600)
     return simplified
 
 

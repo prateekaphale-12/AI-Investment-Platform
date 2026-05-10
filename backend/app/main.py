@@ -1,20 +1,33 @@
 from contextlib import asynccontextmanager
+import os
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.config import settings
 from app.db.init_db import init_db
+from app.services.snapshot_service import generate_daily_snapshot
 from app.utils.logger import setup_logging
 
 setup_logging()
+
+scheduler = AsyncIOScheduler()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
+    is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    if not is_test:
+        if not scheduler.running:
+            scheduler.add_job(generate_daily_snapshot, "interval", hours=24, id="daily-snapshot", replace_existing=True)
+            scheduler.start()
+        await generate_daily_snapshot()
     yield
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

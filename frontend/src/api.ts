@@ -7,6 +7,23 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+export function getToken(): string | null {
+  return localStorage.getItem("access_token");
+}
+
+export function setToken(token: string | null): void {
+  if (token) localStorage.setItem("access_token", token);
+  else localStorage.removeItem("access_token");
+}
+
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export type AnalyzePayload = {
   budget: number;
   risk_tolerance: "low" | "medium" | "high";
@@ -64,5 +81,37 @@ export async function getCapabilities() {
   const { data } = await api.get<{ gemini_configured: boolean; gemini_model: string }>(
     "/api/v1/capabilities",
   );
+  return data;
+}
+
+export async function register(email: string, password: string) {
+  const { data } = await api.post<{ access_token: string; user: { id: string; email: string } }>(
+    "/api/v1/auth/register",
+    { email, password },
+  );
+  return data;
+}
+
+export async function login(email: string, password: string) {
+  const { data } = await api.post<{ access_token: string; user: { id: string; email: string } }>(
+    "/api/v1/auth/login",
+    { email, password },
+  );
+  return data;
+}
+
+export async function me() {
+  const { data } = await api.get<{ id: string; email: string }>("/api/v1/auth/me");
+  return data;
+}
+
+export async function getDailySnapshot() {
+  const { data } = await api.get<{
+    snapshot_date: string;
+    picks: Array<{ ticker: string; current_price: number; ytd_return_pct: number }>;
+    gainers: Array<{ ticker: string; ytd_return_pct: number }>;
+    losers: Array<{ ticker: string; ytd_return_pct: number }>;
+    metrics: { universe_count: number; avg_return_pct: number };
+  }>("/api/v1/market/daily-snapshot");
   return data;
 }

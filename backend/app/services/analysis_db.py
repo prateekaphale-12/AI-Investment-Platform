@@ -22,13 +22,14 @@ async def insert_session(
     db: aiosqlite.Connection,
     session_id: str,
     user_input: dict[str, Any],
+    user_id: str | None = None,
 ) -> None:
     await db.execute(
         """
-        INSERT INTO analysis_sessions (id, user_input, status)
-        VALUES (?, ?, 'processing')
+        INSERT INTO analysis_sessions (id, user_id, user_input, status)
+        VALUES (?, ?, ?, 'processing')
         """,
-        (session_id, json.dumps(user_input)),
+        (session_id, user_id, json.dumps(user_input)),
     )
     for name in AGENT_ORDER:
         await db.execute(
@@ -94,12 +95,38 @@ async def finalize_session(
 
 async def load_session_row(db: aiosqlite.Connection, session_id: str) -> aiosqlite.Row | None:
     cur = await db.execute(
-        """SELECT id, user_input, status, summary, market_data, technical_data, portfolio,
+        """SELECT id, user_id, user_input, status, summary, market_data, technical_data, portfolio,
                   report, report_id, completed_at FROM analysis_sessions WHERE id = ?""",
         (session_id,),
     )
     row = await cur.fetchone()
     return row
+
+
+async def load_user_sessions(db: aiosqlite.Connection, user_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    cur = await db.execute(
+        """
+        SELECT id, status, summary, created_at, completed_at
+        FROM analysis_sessions
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (user_id, limit, offset),
+    )
+    rows = await cur.fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "id": r["id"],
+                "status": r["status"],
+                "summary": json.loads(r["summary"]) if r["summary"] else None,
+                "created_at": r["created_at"],
+                "completed_at": r["completed_at"],
+            }
+        )
+    return out
 
 
 async def load_agent_progress(db: aiosqlite.Connection, session_id: str) -> list[dict[str, Any]]:

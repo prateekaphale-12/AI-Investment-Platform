@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 from app.db.init_db import get_connection
 from app.models.domain import AnalysisStatusResponse, AnalyzeRequest
 from app.services import analysis_db as adb
 from app.services.analysis_runner import execute_analysis
+from app.services.auth_service import get_current_user
 from app.services.stock_service import fetch_price_history
 
 router = APIRouter(prefix="")
@@ -21,7 +26,11 @@ class AnalyzeAccepted(BaseModel):
 
 
 @router.post("/analyze", status_code=202, response_model=AnalyzeAccepted)
-async def start_analysis(payload: AnalyzeRequest, background_tasks: BackgroundTasks) -> AnalyzeAccepted:
+async def start_analysis(
+    payload: AnalyzeRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+) -> AnalyzeAccepted:
     from uuid import uuid4
 
     session_id = str(uuid4())
@@ -29,7 +38,7 @@ async def start_analysis(payload: AnalyzeRequest, background_tasks: BackgroundTa
     ui = payload.model_dump()
     db = await get_connection()
     try:
-        await adb.insert_session(db, session_id, ui)
+        await adb.insert_session(db, session_id, ui, user_id=current_user["id"])
         background_tasks.add_task(execute_analysis, session_id)
     finally:
         await db.close()
@@ -38,12 +47,14 @@ async def start_analysis(payload: AnalyzeRequest, background_tasks: BackgroundTa
 
 
 @router.get("/analysis/{session_id}/status", response_model=AnalysisStatusResponse)
-async def analysis_status(session_id: str) -> AnalysisStatusResponse:
+async def analysis_status(session_id: str, current_user: dict = Depends(get_current_user)) -> AnalysisStatusResponse:
     db = await get_connection()
     try:
         row = await adb.load_session_row(db, session_id)
         if not row:
             raise HTTPException(status_code=404, detail="Session not found")
+        if row["user_id"] and row["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Forbidden")
         steps = await adb.load_agent_progress(db, session_id)
         sess_status = row["status"]
         current = None
@@ -84,12 +95,14 @@ async def analysis_status(session_id: str) -> AnalysisStatusResponse:
 
 
 @router.get("/analysis/{session_id}/results")
-async def analysis_results(session_id: str) -> dict[str, Any]:
+async def analysis_results(session_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
     db = await get_connection()
     try:
         row = await adb.load_session_row(db, session_id)
         if not row:
             raise HTTPException(status_code=404, detail="Session not found")
+        if row["user_id"] and row["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
         def _loads(s: str | None, default: Any) -> Any:
             if not s:
@@ -119,12 +132,14 @@ async def analysis_results(session_id: str) -> dict[str, Any]:
 
 
 @router.get("/analysis/{session_id}/report")
-async def analysis_report(session_id: str) -> dict[str, str]:
+async def analysis_report(session_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, str]:
     db = await get_connection()
     try:
         row = await adb.load_session_row(db, session_id)
         if not row:
             raise HTTPException(status_code=404, detail="Session not found")
+        if row["user_id"] and row["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Forbidden")
         return {"report_id": row["report_id"] or "", "markdown": row["report"] or ""}
     finally:
         await db.close()
@@ -148,3 +163,65 @@ async def stock_price_history(ticker: str, period: str = "1y") -> dict[str, Any]
         return {"ticker": ticker.upper(), "period": yf_period, "points": points}
     finally:
         await db.close()
+
+
+@router.get("/analysis")
+async def list_my_analyses(
+    limit: int = 20,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    db = await get_connection()
+    try:
+        items = await adb.load_user_sessions(db, current_user["id"], limit=limit, offset=offset)
+        return {"items": items, "count": len(items)}
+    finally:
+        await db.close()
+
+
+@router.delete("/analysis/{session_id}")
+async def delete_analysis(session_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, str]:
+    db = await get_connection()
+    try:
+        row = await adb.load_session_row(db, session_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if row["user_id"] and row["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        await db.execute("DELETE FROM agent_progress WHERE session_id = ?", (session_id,))
+        await db.execute("DELETE FROM analysis_sessions WHERE id = ?", (session_id,))
+        await db.commit()
+        return {"status": "deleted"}
+    finally:
+        await db.close()
+
+
+@router.get("/analysis/{session_id}/export/pdf")
+async def export_analysis_pdf(session_id: str, current_user: dict = Depends(get_current_user)) -> FileResponse:
+    db = await get_connection()
+    try:
+        row = await adb.load_session_row(db, session_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if row["user_id"] and row["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        report_text = row["report"] or "No report available."
+    finally:
+        await db.close()
+    export_dir = Path("data/exports")
+    export_dir.mkdir(parents=True, exist_ok=True)
+    out_path = export_dir / f"{session_id}.pdf"
+    c = canvas.Canvas(str(out_path), pagesize=letter)
+    c.setFont("Helvetica", 11)
+    y = 760
+    c.drawString(40, y, f"Analysis Report: {session_id}")
+    y -= 24
+    for line in report_text.splitlines():
+        if y < 50:
+            c.showPage()
+            c.setFont("Helvetica", 11)
+            y = 760
+        c.drawString(40, y, line[:120])
+        y -= 16
+    c.save()
+    return FileResponse(str(out_path), media_type="application/pdf", filename=f"analysis-{session_id}.pdf")
