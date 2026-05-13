@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from app.services.llm_settings_service import test_llm_connection
+from app.services.llm_settings_service import check_llm_connection
 
 async def debug_llm_test():
     """Debug LLM test function directly"""
@@ -16,7 +16,7 @@ async def debug_llm_test():
     print("=" * 50)
     
     try:
-        result = await test_llm_connection(
+        result = await check_llm_connection(
             "groq",
             "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"
         )

@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 from app.services.llm_service import get_available_providers, LLMProvider
 from app.services.auth_service import get_current_user
-from app.services.llm_settings_service import save_user_llm_settings, get_user_llm_settings, test_llm_connection
+from app.services.llm_settings_service import save_user_llm_settings, get_user_llm_settings, check_llm_connection
 
 router = APIRouter()
 
@@ -33,15 +33,15 @@ async def get_llm_providers():
 
 
 @router.post("/test")
-async def test_llm_connection(
+async def check_llm_connection(
     request: LLMTestRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """Test LLM connection before saving"""
     try:
         # Use the updated test function that handles direct client calls
-        from app.services.llm_settings_service import test_llm_connection
-        result = await test_llm_connection(request.provider, request.api_key)
+        from app.services.llm_settings_service import check_llm_connection
+        result = await check_llm_connection(request.provider, request.api_key)
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

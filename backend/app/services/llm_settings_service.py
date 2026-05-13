@@ -132,7 +132,7 @@ async def get_user_llm_settings(user_id: str) -> Dict[str, Any]:
         await db.close()
 
 
-async def test_llm_connection(provider: str, api_key: str) -> Dict[str, Any]:
+async def check_llm_connection(provider: str, api_key: str) -> Dict[str, Any]:
     """Test LLM connection with provided credentials"""
     try:
         # Direct Groq test for now, extend for other providers later
