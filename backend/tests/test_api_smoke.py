@@ -26,8 +26,12 @@ def test_health_and_capabilities_endpoints(tmp_path: Path) -> None:
         c = client.get("/api/v1/capabilities")
         assert c.status_code == 200
         body = c.json()
-        assert "gemini_configured" in body
-        assert "gemini_model" in body
+
+        assert "groq_configured" in body
+        assert "groq_model" in body
+
+        assert "openai_configured" in body
+        assert "openai_model" in body
 
 
 def test_analyze_accepts_request_and_creates_session(tmp_path: Path, monkeypatch) -> None:
