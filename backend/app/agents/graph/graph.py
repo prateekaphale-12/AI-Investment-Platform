@@ -46,12 +46,14 @@ async def run_graph(
     db: aiosqlite.Connection,
     session_id: str,
     user_input: dict[str, Any],
+    llm_settings: dict[str, Any] = None,
 ) -> AgentState:
     graph = build_analysis_graph()
     initial: AgentState = {
         "session_id": session_id,
         "user_input": user_input,
         "errors": [],
+        "llm_settings": llm_settings or {},
     }
     cfg = {"configurable": {"db": db, "session_id": session_id}}
     out = await graph.ainvoke(initial, config=cfg)

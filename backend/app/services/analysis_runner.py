@@ -19,7 +19,13 @@ async def execute_analysis(session_id: str) -> None:
             logger.error("execute_analysis: session {} not found", session_id)
             return
         user_input = json.loads(row["user_input"])
-        await run_graph(db, session_id, user_input)
+        user_id = row["user_id"]
+        
+        # Load user's LLM settings
+        from app.services.llm_settings_service import get_llm_settings
+        llm_settings = await get_llm_settings(user_id)
+        
+        await run_graph(db, session_id, user_input, llm_settings)
     except Exception as e:
         logger.exception("execute_analysis failed: {}", e)
         await adb.finalize_session(

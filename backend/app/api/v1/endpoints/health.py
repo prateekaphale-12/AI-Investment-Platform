@@ -14,6 +14,8 @@ async def health() -> HealthResponse:
 @router.get("/capabilities")
 async def capabilities() -> dict[str, bool | str]:
     return {
-        "gemini_configured": bool(settings.gemini_api_key),
-        "gemini_model": settings.gemini_model,
+        "openai_configured": bool(getattr(settings, 'openai_api_key', None)),
+        "openai_model": getattr(settings, 'openai_model', 'gpt-3.5-turbo'),
+        "groq_configured": bool(getattr(settings, 'groq_api_key', None)),
+        "groq_model": getattr(settings, 'groq_model', 'llama-3.1-8b-instant'),
     }

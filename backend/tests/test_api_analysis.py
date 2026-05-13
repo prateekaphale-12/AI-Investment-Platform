@@ -8,6 +8,16 @@ from app.config import settings
 from app.main import app
 
 
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    reg = client.post(
+        "/api/v1/auth/register",
+        json={"email": "user@example.com", "password": "Pass12345!"},
+    )
+    assert reg.status_code == 200
+    token = reg.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_analysis_endpoints_happy_path(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "test_app.db"
     monkeypatch.setattr(settings, "database_path", db_path)
@@ -63,6 +73,7 @@ def test_analysis_endpoints_happy_path(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(analysis_endpoint, "execute_analysis", _fake_execute_analysis)
 
     with TestClient(app) as client:
+        headers = _auth_headers(client)
         payload = {
             "budget": 50000,
             "risk_tolerance": "medium",
@@ -70,15 +81,15 @@ def test_analysis_endpoints_happy_path(tmp_path: Path, monkeypatch) -> None:
             "interests": ["Technology"],
             "goal": "growth",
         }
-        create = client.post("/api/v1/analyze", json=payload)
+        create = client.post("/api/v1/analyze", json=payload, headers=headers)
         assert create.status_code == 202
         session_id = create.json()["session_id"]
 
-        status = client.get(f"/api/v1/analysis/{session_id}/status")
+        status = client.get(f"/api/v1/analysis/{session_id}/status", headers=headers)
         assert status.status_code == 200
         assert status.json()["status"] == "completed"
 
-        results = client.get(f"/api/v1/analysis/{session_id}/results")
+        results = client.get(f"/api/v1/analysis/{session_id}/results", headers=headers)
         assert results.status_code == 200
         body = results.json()
         assert body["status"] == "completed"
@@ -89,5 +100,6 @@ def test_analysis_endpoints_happy_path(tmp_path: Path, monkeypatch) -> None:
 def test_analysis_status_not_found(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(settings, "database_path", tmp_path / "test_app.db")
     with TestClient(app) as client:
-        res = client.get("/api/v1/analysis/does-not-exist/status")
+        headers = _auth_headers(client)
+        res = client.get("/api/v1/analysis/does-not-exist/status", headers=headers)
         assert res.status_code == 404

@@ -7,6 +7,7 @@ from typing import Annotated, TypedDict
 class AgentState(TypedDict, total=False):
     session_id: str
     user_input: dict
+    llm_settings: dict
 
     stock_universe: list[str]
     strategy: str

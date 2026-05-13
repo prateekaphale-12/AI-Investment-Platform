@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getCapabilities, getResults, getStatus, postAnalyze, type AnalyzePayload } from "../api";
+import {
+  getCapabilities,
+  getDailySnapshot,
+  getResults,
+  getStatus,
+  postAnalyze,
+  type AnalyzePayload,
+} from "../api";
 import { AIReport } from "../components/AIReport";
 import { AllocationPieChart } from "../components/AllocationPieChart";
 import { LoadingIndicator } from "../components/LoadingIndicator";
@@ -21,6 +28,12 @@ export function HomePage() {
     errors?: string[];
   } | null>(null);
   const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null);
+  const [snapshot, setSnapshot] = useState<{
+    picks: Array<{ ticker: string; ytd_return_pct: number }>;
+    gainers: Array<{ ticker: string; ytd_return_pct: number }>;
+    losers: Array<{ ticker: string; ytd_return_pct: number }>;
+    metrics: { universe_count: number; avg_return_pct: number };
+  } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPoll = useCallback(() => {
@@ -43,6 +56,9 @@ export function HomePage() {
     return () => {
       mounted = false;
     };
+  }, []);
+  useEffect(() => {
+    getDailySnapshot().then((s) => setSnapshot(s)).catch(() => setSnapshot(null));
   }, []);
 
   async function handleAnalyze(payload: AnalyzePayload) {
@@ -118,7 +134,43 @@ export function HomePage() {
           We orchestrate deterministic data pulls and technical math, then use Gemini strictly for readable narrative.
           Every number you see traces back to code, not improvised LLM math.
         </p>
+        <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
+          Use the form below to run a new analysis. Your history is tied to your account.
+        </p>
       </section>
+      {snapshot ? (
+        <section className="grid gap-4 md:grid-cols-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs">
+            <p className="text-slate-400">Today's picks</p>
+            {snapshot.picks.map((p) => (
+              <p key={p.ticker} className="text-white">
+                {p.ticker} ({p.ytd_return_pct}%)
+              </p>
+            ))}
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs">
+            <p className="text-slate-400">Top highs</p>
+            {snapshot.gainers.map((g) => (
+              <p key={g.ticker} className="text-emerald-300">
+                {g.ticker} ({g.ytd_return_pct}%)
+              </p>
+            ))}
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs">
+            <p className="text-slate-400">Top lows</p>
+            {snapshot.losers.map((l) => (
+              <p key={l.ticker} className="text-rose-300">
+                {l.ticker} ({l.ytd_return_pct}%)
+              </p>
+            ))}
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs">
+            <p className="text-slate-400">Daily metrics</p>
+            <p className="text-white">Universe: {snapshot.metrics.universe_count}</p>
+            <p className="text-white">Avg return: {snapshot.metrics.avg_return_pct}%</p>
+          </div>
+        </section>
+      ) : null}
 
       <div className="grid gap-8 lg:grid-cols-5 lg:items-start">
         <div className="lg:col-span-2">

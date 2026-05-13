@@ -410,7 +410,28 @@ async def report_generation_node(state: AgentState, config: RunnableConfig) -> d
             "Use only facts from the data block below; add an Executive Summary and per-ticker section.\n\n"
             "<DATA>\n" + "\n".join(facts_block) + "\n</DATA>\n"
         )
-        report = await generate_investment_report(markdown_prompt)
+        # Get user's LLM settings
+        llm_settings = state.get("llm_settings", {})
+        provider_str = llm_settings.get("provider", "groq")
+        api_key = None
+        
+        # Convert string to LLMProvider enum
+        from app.services.llm_service import LLMProvider
+        if provider_str == "groq":
+            provider = LLMProvider.GROQ
+        elif provider_str == "openai":
+            provider = LLMProvider.OPENAI
+        else:
+            provider = LLMProvider.GROQ  # default to groq
+        
+        # Extract API key from user's saved settings
+        if provider_str in llm_settings.get("settings", {}):
+            api_key = llm_settings["settings"][provider_str].get("api_key")
+        
+        if not api_key:
+            raise ValueError("API key is required for report generation")
+        
+        report = await generate_investment_report(markdown_prompt, provider=provider, api_key=api_key)
         report_id = f"r-{session_id[:8]}"
 
         await adb.finalize_session(
