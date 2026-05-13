@@ -40,7 +40,8 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_access_token(subject: str) -> str:
     expires = datetime.now(UTC) + timedelta(minutes=settings.jwt_expire_minutes)
-    payload = {"sub": subject, "exp": expires}
+    # Convert datetime to Unix timestamp (integer) for JSON serialization
+    payload = {"sub": subject, "exp": int(expires.timestamp())}
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -97,4 +98,3 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict[str, Any
         return {"id": row["id"], "email": row["email"]}
     finally:
         await db.close()
-
