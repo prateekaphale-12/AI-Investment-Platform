@@ -24,22 +24,19 @@ async def _cache_get(db: aiosqlite.Connection, ticker: str, data_type: str) -> d
     if not row:
         return None
     
-    # FIX: row["fetched_at"] is now a datetime object directly from DB,
-    # so we don't need .fromisoformat() anymore.
+    # row["fetched_at"] is a naive datetime from DB (no timezone info)
     fetched = row["fetched_at"]
     
-    # Ensure timezone awareness for comparison
-    if fetched.tzinfo is None:
-        fetched = fetched.replace(tzinfo=UTC)
-        
-    if datetime.now(UTC) - fetched > CACHE_TTL:
+    # Compare naive datetimes to avoid timezone mismatch errors
+    if datetime.now(UTC).replace(tzinfo=None) - fetched > CACHE_TTL:
         return None
     return json.loads(row["data"])
 
 
 async def _cache_set(db: aiosqlite.Connection, ticker: str, data_type: str, data: dict[str, Any]) -> None:
-    # FIX: Pass the native datetime object directly
-    now = datetime.now(UTC)
+    # Use naive UTC datetime for PostgreSQL (remove tzinfo before storing)
+    # This ensures consistency with what comes back from the DB
+    now = datetime.now(UTC).replace(tzinfo=None)
     
     await db.execute(
         """
