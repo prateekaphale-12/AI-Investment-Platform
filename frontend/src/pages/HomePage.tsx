@@ -5,11 +5,7 @@ import {
   getDailySnapshot,
   getResults,
   getStatus,
-  login,
-  me,
   postAnalyze,
-  register,
-  setToken,
   type AnalyzePayload,
 } from "../api";
 import { AIReport } from "../components/AIReport";
@@ -38,9 +34,6 @@ export function HomePage() {
     losers: Array<{ ticker: string; ytd_return_pct: number }>;
     metrics: { universe_count: number; avg_return_pct: number };
   } | null>(null);
-  const [email, setEmail] = useState("demo@example.com");
-  const [password, setPassword] = useState("Pass12345!");
-  const [userEmail, setUserEmail] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPoll = useCallback(() => {
@@ -67,17 +60,6 @@ export function HomePage() {
   useEffect(() => {
     getDailySnapshot().then((s) => setSnapshot(s)).catch(() => setSnapshot(null));
   }, []);
-  useEffect(() => {
-    me()
-      .then((u) => setUserEmail(u.email))
-      .catch(() => setUserEmail(null));
-  }, []);
-
-  async function doLogin(mode: "login" | "register") {
-    const res = mode === "login" ? await login(email, password) : await register(email, password);
-    setToken(res.access_token);
-    setUserEmail(res.user.email);
-  }
 
   async function handleAnalyze(payload: AnalyzePayload) {
     stopPoll();
@@ -152,30 +134,9 @@ export function HomePage() {
           We orchestrate deterministic data pulls and technical math, then use Gemini strictly for readable narrative.
           Every number you see traces back to code, not improvised LLM math.
         </p>
-        <div className="mt-4 grid gap-2 md:grid-cols-3">
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white"
-            placeholder="email"
-          />
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white"
-            placeholder="password"
-            type="password"
-          />
-          <div className="flex gap-2">
-            <button onClick={() => void doLogin("login")} className="rounded bg-indigo-500 px-2 py-1 text-xs">
-              Login
-            </button>
-            <button onClick={() => void doLogin("register")} className="rounded bg-slate-700 px-2 py-1 text-xs">
-              Register
-            </button>
-            {userEmail ? <span className="text-xs text-emerald-300">{userEmail}</span> : null}
-          </div>
-        </div>
+        <p className="mt-4 max-w-2xl text-sm text-slate-300 md:text-base">
+          Use the form below to run a new analysis. Your history is tied to your account.
+        </p>
       </section>
       {snapshot ? (
         <section className="grid gap-4 md:grid-cols-4">

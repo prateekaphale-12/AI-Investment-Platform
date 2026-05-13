@@ -22,8 +22,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
       DATABASE_URL: postgresql://ai_app:Cr7m10p7!!@postgres:5432/ai_investment
       REDIS_URL: redis://redis:6379/0

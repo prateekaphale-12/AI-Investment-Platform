@@ -23,13 +23,24 @@ async def _cache_get(db: aiosqlite.Connection, ticker: str, data_type: str) -> d
     row = await cur.fetchone()
     if not row:
         return None
-    fetched = datetime.fromisoformat(row["fetched_at"])
-    if datetime.now(UTC).replace(tzinfo=None) - fetched > CACHE_TTL:
+    
+    # FIX: row["fetched_at"] is now a datetime object directly from DB,
+    # so we don't need .fromisoformat() anymore.
+    fetched = row["fetched_at"]
+    
+    # Ensure timezone awareness for comparison
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=UTC)
+        
+    if datetime.now(UTC) - fetched > CACHE_TTL:
         return None
     return json.loads(row["data"])
 
 
 async def _cache_set(db: aiosqlite.Connection, ticker: str, data_type: str, data: dict[str, Any]) -> None:
+    # FIX: Pass the native datetime object directly
+    now = datetime.now(UTC)
+    
     await db.execute(
         """
         INSERT INTO stock_cache (ticker, data_type, data, fetched_at)
@@ -38,7 +49,7 @@ async def _cache_set(db: aiosqlite.Connection, ticker: str, data_type: str, data
             data = excluded.data,
             fetched_at = excluded.fetched_at
         """,
-        (ticker.upper(), data_type, json.dumps(data), datetime.now(UTC).replace(tzinfo=None).isoformat()),
+        (ticker.upper(), data_type, json.dumps(data), now),
     )
 
 

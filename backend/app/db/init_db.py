@@ -1,11 +1,18 @@
 from collections.abc import AsyncGenerator
 from pathlib import Path
+import os
 
 import aiosqlite
 import asyncpg
 
-from app.config import settings
 from app.db.database import PgConnectionAdapter, SqliteConnectionAdapter
+
+
+def _settings():
+    """Read config at call time so tests may replace ``app.config.settings`` (isolated SQLite)."""
+    import app.config as app_config
+
+    return app_config.settings
 
 # SQLite: create tables first. Do not create idx_watchlist_user_ticker until after
 # optional ALTERs — existing DB files may predate user_id columns, and SQLite will
@@ -140,8 +147,10 @@ def _ensure_parent_dir(path: Path) -> None:
 
 
 async def init_db() -> None:
-    if settings.database_url:
-        conn = await asyncpg.connect(settings.database_url)
+    settings = _settings()
+    db_url = getattr(settings, 'database_url', None) or os.getenv('DATABASE_URL')
+    if db_url:
+        conn = await asyncpg.connect(db_url)
         try:
             for stmt in filter(None, [s.strip() for s in SCHEMA_PG.split(";")]):
                 await conn.execute(stmt)
@@ -162,14 +171,16 @@ async def init_db() -> None:
     async with aiosqlite.connect(path) as db:
         await db.executescript(SCHEMA_TABLES_SQLITE)
         # Lightweight alignment for SQLite files created before auth columns existed.
-        cur = await db.execute("PRAGMA table_info(analysis_sessions)")
-        cols = [r[1] for r in await cur.fetchall()]
-        if "user_id" not in cols:
-            await db.execute("ALTER TABLE analysis_sessions ADD COLUMN user_id TEXT")
-        cur = await db.execute("PRAGMA table_info(watchlist)")
-        wcols = [r[1] for r in await cur.fetchall()]
-        if "user_id" not in wcols:
-            await db.execute("ALTER TABLE watchlist ADD COLUMN user_id TEXT")
+        # Skip PRAGMA commands for PostgreSQL
+        if not db_url:
+            cur = await db.execute("PRAGMA table_info(analysis_sessions)")
+            cols = [r[1] for r in await cur.fetchall()]
+            if "user_id" not in cols:
+                await db.execute("ALTER TABLE analysis_sessions ADD COLUMN user_id TEXT")
+            cur = await db.execute("PRAGMA table_info(watchlist)")
+            wcols = [r[1] for r in await cur.fetchall()]
+            if "user_id" not in wcols:
+                await db.execute("ALTER TABLE watchlist ADD COLUMN user_id TEXT")
         await db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_user_ticker ON watchlist(user_id, ticker)"
         )
@@ -177,8 +188,10 @@ async def init_db() -> None:
 
 
 async def get_connection():
-    if settings.database_url:
-        conn = await asyncpg.connect(settings.database_url)
+    settings = _settings()
+    db_url = getattr(settings, 'database_url', None) or os.getenv('DATABASE_URL')
+    if db_url:
+        conn = await asyncpg.connect(db_url)
         return PgConnectionAdapter(conn)
     path = settings.database_path
     if not path.is_absolute():

@@ -24,6 +24,7 @@ async def insert_session(
     user_input: dict[str, Any],
     user_id: str | None = None,
 ) -> None:
+    # PostgreSQL doesn't need WAL mode pragmas
     await db.execute(
         """
         INSERT INTO analysis_sessions (id, user_id, user_input, status)

@@ -37,7 +37,7 @@ async def _warm_daily_snapshot_background() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
-    is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    is_test = bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv("PYTEST_RUNNING") == "1"
     if not is_test:
         if not scheduler.running:
             scheduler.add_job(generate_daily_snapshot, "interval", hours=24, id="daily-snapshot", replace_existing=True)

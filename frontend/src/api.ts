@@ -24,6 +24,8 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+export type ApiUser = { id: string; email: string };
+
 export type AnalyzePayload = {
   budget: number;
   risk_tolerance: "low" | "medium" | "high";
@@ -77,6 +79,10 @@ export async function removeWatchlist(ticker: string) {
   await api.delete(`/api/v1/watchlist/${ticker}`);
 }
 
+export async function deleteWatchlistItem(id: string) {
+  await api.delete(`/api/v1/watchlist/${id}`);
+}
+
 export async function getCapabilities() {
   const { data } = await api.get<{ gemini_configured: boolean; gemini_model: string }>(
     "/api/v1/capabilities",
@@ -113,5 +119,24 @@ export async function getDailySnapshot() {
     losers: Array<{ ticker: string; ytd_return_pct: number }>;
     metrics: { universe_count: number; avg_return_pct: number };
   }>("/api/v1/market/daily-snapshot");
+  return data;
+}
+
+// LLM Provider Management
+export async function getLLMProviders() {
+  const { data } = await api.get<{ providers: Array<{ value: string; label: string; model: string }> }>("/api/v1/llm/providers");
+  return data.providers;
+}
+
+export async function getLLMSettings() {
+  const { data } = await api.get<{ provider: string; model: string; has_api_key: boolean }>("/api/v1/llm/settings");
+  return data;
+}
+
+export async function saveLLMSettings(provider: string, apiKey: string) {
+  const { data } = await api.post<{ message: string; provider: string }>("/api/v1/llm/settings", {
+    provider,
+    api_key: apiKey
+  });
   return data;
 }
