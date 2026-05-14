@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from typing import Any, Dict
 
-import aiosqlite
 from cryptography.fernet import Fernet
 from loguru import logger
 
@@ -53,10 +52,10 @@ async def save_user_llm_settings(user_id: str, provider: str, model: str, api_ke
             # Encrypt API key before storing
             encrypted_key = encrypt_api_key(api_key)
             
-            # Check if settings already exist for this user/provider
+            # Check if settings already exist for this user
             cur = await db.execute(
-                "SELECT id FROM user_llm_settings WHERE user_id = ? AND provider = ?",
-                (user_id, provider)
+                "SELECT id FROM user_llm_settings WHERE user_id = ?",
+                (user_id,)
             )
             existing = await cur.fetchone()
             
@@ -64,9 +63,9 @@ async def save_user_llm_settings(user_id: str, provider: str, model: str, api_ke
                 # Update existing settings
                 await db.execute(
                     """UPDATE user_llm_settings 
-                           SET model = ?, api_key_encrypted = ?, updated_at = CURRENT_TIMESTAMP 
-                           WHERE user_id = ? AND provider = ?""",
-                    (model, encrypted_key, user_id, provider)
+                       SET provider = ?, model = ?, api_key_encrypted = ?, updated_at = CURRENT_TIMESTAMP 
+                       WHERE user_id = ?""",
+                    (provider, model, encrypted_key, user_id)
                 )
             else:
                 # Insert new settings
@@ -74,8 +73,8 @@ async def save_user_llm_settings(user_id: str, provider: str, model: str, api_ke
                 settings_id = str(uuid4())
                 await db.execute(
                     """INSERT INTO user_llm_settings 
-                           (id, user_id, provider, model, api_key_encrypted, created_at, updated_at) 
-                           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                       (id, user_id, provider, model, api_key_encrypted, created_at, updated_at) 
+                       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
                     (settings_id, user_id, provider, model, encrypted_key)
                 )
             
@@ -110,21 +109,23 @@ async def get_user_llm_settings(user_id: str) -> Dict[str, Any]:
                WHERE user_id = ?""",
             (user_id,)
         )
-        rows = await cur.fetchall()
+        row = await cur.fetchone()
         
-        settings = {}
-        for row in rows:
-            # Decrypt API key for each provider
-            decrypted_key = decrypt_api_key(row["api_key_encrypted"])
-            settings[row["provider"]] = {
+        if not row:
+            return {}
+        
+        # Decrypt API key
+        decrypted_key = decrypt_api_key(row["api_key_encrypted"])
+        
+        return {
+            row["provider"]: {
                 "provider": row["provider"],
                 "model": row["model"],
                 "api_key": decrypted_key,
                 "has_api_key": bool(decrypted_key),
                 "updated_at": row["updated_at"]
             }
-        
-        return settings
+        }
     except Exception as e:
         logger.error(f"Failed to get LLM settings: {e}")
         return {}

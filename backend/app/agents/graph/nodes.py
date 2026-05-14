@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import aiosqlite
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
@@ -28,9 +27,32 @@ from app.services.technical_service import compute_indicators
 from app.utils.stock_universe import available_sectors, tickers_for_interests
 
 
-def _cfg(config: RunnableConfig) -> tuple[aiosqlite.Connection, str]:
+def _cfg(config: RunnableConfig) -> tuple[Any, str]:
     c = config["configurable"]
     return c["db"], c["session_id"]
+
+
+def _extract_llm_config(state: AgentState) -> tuple[Any, str | None]:
+    """Extract LLM provider and API key from state.
+    
+    Returns:
+        Tuple of (LLMProvider, api_key)
+    """
+    from app.services.llm_service import LLMProvider
+    
+    llm_config = state.get("llm_settings", {})
+    provider_str = llm_config.get("provider", "groq")
+    api_key = llm_config.get("api_key")
+    
+    # Convert string to LLMProvider enum
+    if provider_str == "groq":
+        provider = LLMProvider.GROQ
+    elif provider_str == "openai":
+        provider = LLMProvider.OPENAI
+    else:
+        provider = LLMProvider.GROQ  # default to groq
+    
+    return provider, api_key
 
 
 async def planner_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -42,6 +64,10 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> dict[str, A
         risk = ui.get("risk_tolerance") or "medium"
         normalized_interests = list(interests)
         ai_reason = ""
+        
+        # Extract LLM settings from state
+        provider, api_key = _extract_llm_config(state)
+        
         ai_norm = await generate_json_object(
             (
                 "Normalize investment interests to sector labels from allowed list.\n"
@@ -49,7 +75,9 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> dict[str, A
                 f"Input interests: {interests}\n"
                 f"Goal: {ui.get('goal')}; horizon: {ui.get('investment_horizon')}; risk: {risk}\n"
                 'Return object: {"normalized_interests": ["..."], "reason": "..."}'
-            )
+            ),
+            provider=provider,
+            api_key=api_key
         )
         if ai_norm:
             candidate = ai_norm.get("normalized_interests")
@@ -368,7 +396,11 @@ async def report_generation_node(state: AgentState, config: RunnableConfig) -> d
             "For each ticker line below, reply with one line ONLY in the format TICKER: one concise sentence "
             "explaining inclusion (no invented numbers).\n\n" + "\n".join(batch_lines)
         )
-        summaries_raw = await generate_ticker_summaries(summaries_prompt)
+        
+        # Extract LLM settings from state for ticker summaries
+        provider, api_key = _extract_llm_config(state)
+        
+        summaries_raw = await generate_ticker_summaries(summaries_prompt, provider=provider, api_key=api_key)
         merged = _merge_summary_lines(summaries_raw, [r["ticker"] for r in allocations_list])
         for row in allocations_list:
             rationale = row.get("rationale") or {}
@@ -388,45 +420,36 @@ async def report_generation_node(state: AgentState, config: RunnableConfig) -> d
 
         facts_block = []
         facts_block.append(
-            f"Budget: ${budget:,.2f}; risk: {ui.get('risk_tolerance')}; goal: {ui.get('goal')}.\nStrategy: {state.get('strategy','')}"
+            f"Budget: ${budget:,.2f}; Risk: {ui.get('risk_tolerance')}; Goal: {ui.get('goal')}"
         )
-        facts_block.append("Allocations:")
+        facts_block.append("ALLOCATIONS:")
         for a in allocations_list:
-            facts_block.append(
-                f"- {a['ticker']}: {a['allocation_pct']}% (~${a['amount']:,.2f}), "
-                f"heuristic return proxy {a['expected_return']}%, risk score {a['risk_score']}."
-            )
             r = a.get("rationale", {})
-            facts_block.append(f"  Rationale bullets: market: {r.get('market_trend')}")
-            facts_block.append(f"  Technical: {r.get('technical')}")
-            facts_block.append(f"  Sentiment: {r.get('sentiment')}")
-            facts_block.append(f"  Fundamentals: {r.get('fundamentals')}")
-            facts_block.append(f"  Risk: {r.get('risk')}")
-            facts_block.append(f"  Summary: {r.get('summary')}")
+            # Truncate rationale to reduce token count
+            market = (r.get('market_trend') or "")[:100]
+            technical = (r.get('technical') or "")[:100]
+            sentiment = (r.get('sentiment') or "")[:100]
+            fundamentals = (r.get('fundamentals') or "")[:100]
+            risk = (r.get('risk') or "")[:100]
+            
+            facts_block.append(
+                f"{a['ticker']}: {a['allocation_pct']}% (${a['amount']:,.0f}), "
+                f"Return {a['expected_return']}%, Risk {a['risk_score']:.0f}/100"
+            )
+            facts_block.append(f"  Market: {market}")
+            facts_block.append(f"  Technical: {technical}")
+            facts_block.append(f"  Sentiment: {sentiment}")
+            facts_block.append(f"  Fundamentals: {fundamentals}")
+            facts_block.append(f"  Risk: {risk}")
 
         markdown_prompt = (
-            "Write a polished **investment research memo** in Markdown.\n"
-            "Rules: clarify this is decision-support research, NOT financial advice, NOT price prediction.\n"
-            "Use only facts from the data block below; add an Executive Summary and per-ticker section.\n\n"
-            "<DATA>\n" + "\n".join(facts_block) + "\n</DATA>\n"
+            "Write a concise investment research memo in Markdown (max 1500 words).\n"
+            "Include: Executive Summary, per-ticker analysis, and conclusion.\n"
+            "Clarify this is decision-support research, NOT financial advice.\n\n"
+            "DATA:\n" + "\n".join(facts_block) + "\n"
         )
         # Get user's LLM settings
-        llm_settings = state.get("llm_settings", {})
-        provider_str = llm_settings.get("provider", "groq")
-        api_key = None
-        
-        # Convert string to LLMProvider enum
-        from app.services.llm_service import LLMProvider
-        if provider_str == "groq":
-            provider = LLMProvider.GROQ
-        elif provider_str == "openai":
-            provider = LLMProvider.OPENAI
-        else:
-            provider = LLMProvider.GROQ  # default to groq
-        
-        # Extract API key from user's saved settings
-        if provider_str in llm_settings.get("settings", {}):
-            api_key = llm_settings["settings"][provider_str].get("api_key")
+        provider, api_key = _extract_llm_config(state)
         
         if not api_key:
             raise ValueError("API key is required for report generation")

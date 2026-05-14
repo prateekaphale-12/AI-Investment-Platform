@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
-import aiosqlite
 import asyncpg
 
 
@@ -42,6 +42,8 @@ class PgConnectionAdapter:
     async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> PgCursor:
         q = _to_pg_sql(sql)
         ql = q.lstrip().lower()
+        # Convert any UUID objects to strings for asyncpg compatibility
+        params = tuple(str(p) if isinstance(p, UUID) else p for p in params)
         if ql.startswith("select"):
             rows = await self.conn.fetch(q, *params)
             return PgCursor(list(rows))
@@ -54,23 +56,6 @@ class PgConnectionAdapter:
     async def commit(self) -> None:
         # asyncpg auto-commits individual statements by default.
         return None
-
-    async def close(self) -> None:
-        await self.conn.close()
-
-
-class SqliteConnectionAdapter:
-    def __init__(self, conn: aiosqlite.Connection):
-        self.conn = conn
-
-    async def execute(self, sql: str, params: tuple[Any, ...] = ()):
-        return await self.conn.execute(sql, params)
-
-    async def executescript(self, script: str):
-        return await self.conn.executescript(script)
-
-    async def commit(self) -> None:
-        await self.conn.commit()
 
     async def close(self) -> None:
         await self.conn.close()

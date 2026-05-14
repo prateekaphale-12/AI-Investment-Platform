@@ -21,11 +21,11 @@ async def execute_analysis(session_id: str) -> None:
         user_input = json.loads(row["user_input"])
         user_id = row["user_id"]
         
-        # Load user's LLM settings
-        from app.services.llm_settings_service import get_llm_settings
-        llm_settings = await get_llm_settings(user_id)
+        # Query database ONCE to get user's LLM settings
+        llm_config = await _load_user_llm_config(db, user_id)
         
-        await run_graph(db, session_id, user_input, llm_settings)
+        # Pass config to graph - it will be available in state for all nodes
+        await run_graph(db, session_id, user_input, llm_config)
     except Exception as e:
         logger.exception("execute_analysis failed: {}", e)
         await adb.finalize_session(
@@ -41,3 +41,51 @@ async def execute_analysis(session_id: str) -> None:
         )
     finally:
         await db.close()
+
+
+async def _load_user_llm_config(db: Any, user_id: str) -> dict[str, Any]:
+    """Load user's LLM configuration from database (single query).
+    
+    Returns dict with structure:
+    {
+        "provider": "groq",
+        "model": "llama-3.1-8b-instant",
+        "api_key": "gsk_...",
+        "has_api_key": True
+    }
+    """
+    try:
+        cur = await db.execute(
+            "SELECT provider, model, api_key_encrypted FROM user_llm_settings WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cur.fetchone()
+        
+        if not row:
+            # No settings saved, use defaults
+            return {
+                "provider": "groq",
+                "model": "llama-3.1-8b-instant",
+                "api_key": None,
+                "has_api_key": False
+            }
+        
+        # Decrypt API key
+        from app.services.llm_settings_service import decrypt_api_key
+        api_key = decrypt_api_key(row["api_key_encrypted"])
+        
+        return {
+            "provider": row["provider"],
+            "model": row["model"],
+            "api_key": api_key,
+            "has_api_key": bool(api_key)
+        }
+    except Exception as e:
+        logger.error(f"Failed to load LLM config: {e}")
+        # Return defaults on error
+        return {
+            "provider": "groq",
+            "model": "llama-3.1-8b-instant",
+            "api_key": None,
+            "has_api_key": False
+        }

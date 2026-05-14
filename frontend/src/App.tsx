@@ -6,6 +6,7 @@ import { useAuth } from "./context/AuthContext";
 import { AuthPage } from "./pages/AuthPage";
 import { HomePage } from "./pages/HomePage";
 import { LLMSettingsPage } from "./pages/LLMSettingsPage";
+import { HistoryPage } from "./pages/HistoryPage";
 
 const WatchlistPage = lazy(() =>
   import("./pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage })),
@@ -29,6 +30,9 @@ function Header() {
           <nav className="flex gap-6 text-sm text-slate-300">
             <Link to="/" className="hover:text-white">
               Home
+            </Link>
+            <Link to="/history" className="hover:text-white">
+              History
             </Link>
             <Link to="/watchlist" className="hover:text-white">
               Watchlist
@@ -80,6 +84,14 @@ export default function App() {
               element={
                 <PrivateRoute>
                   <HomePage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/history"
+              element={
+                <PrivateRoute>
+                  <HistoryPage />
                 </PrivateRoute>
               }
             />

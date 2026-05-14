@@ -40,8 +40,19 @@ async def lifespan(_: FastAPI):
     is_test = bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv("PYTEST_RUNNING") == "1"
     if not is_test:
         if not scheduler.running:
-            scheduler.add_job(generate_daily_snapshot, "interval", hours=24, id="daily-snapshot", replace_existing=True)
+            # Refresh snapshot every 30 minutes
+            # Stock data (yfinance): FREE, no rate limits
+            # News data (Alpha Vantage + NewsAPI): Limited, but 30-min refresh is safe
+            # 30-minute refresh = 1,920 yfinance calls/day (very respectful)
+            scheduler.add_job(
+                generate_daily_snapshot,
+                "interval",
+                minutes=30,
+                id="snapshot-refresh",
+                replace_existing=True,
+            )
             scheduler.start()
+        # Warm up cache on startup (non-blocking)
         asyncio.create_task(_warm_daily_snapshot_background())
     yield
     if scheduler.running:

@@ -82,21 +82,21 @@ async def get_llm_settings(
     """Get user's current LLM settings"""
     settings = await get_user_llm_settings(current_user["id"])
     
-    # Return current active provider (first one with API key)
-    active_provider = None
-    for provider, config in settings.items():
-        if config["has_api_key"]:
-            active_provider = provider
-            break
+    if not settings:
+        # No settings saved yet
+        return {
+            "provider": "",
+            "model": "",
+            "has_api_key": False,
+            "settings": {}
+        }
     
-    if not active_provider and settings:
-        # If no active provider, use first available
-        active_provider = list(settings.keys())[0]
-    
-    provider_config = settings.get(active_provider, {})
+    # Get the first (and only) provider from settings
+    provider_name = list(settings.keys())[0]
+    provider_config = settings[provider_name]
     
     return {
-        "provider": active_provider or "",
+        "provider": provider_name,
         "model": provider_config.get("model", ""),
         "has_api_key": provider_config.get("has_api_key", False),
         "settings": settings

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import aiosqlite
+import asyncpg
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.graph.nodes import (
@@ -43,7 +43,7 @@ def build_analysis_graph() -> Any:
 
 
 async def run_graph(
-    db: aiosqlite.Connection,
+    db: asyncpg.Connection,
     session_id: str,
     user_input: dict[str, Any],
     llm_settings: dict[str, Any] = None,

@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     
     groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.1-8b-instant", validation_alias="GROQ_MODEL")
+    
+    # News API Keys (free tiers)
+    alpha_vantage_key: str = Field(default="", validation_alias="ALPHA_VANTAGE_KEY")
+    newsapi_key: str = Field(default="", validation_alias="NEWSAPI_KEY")
+    
     jwt_secret_key: str = Field(default="change-me", validation_alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     jwt_expire_minutes: int = Field(default=60 * 24, validation_alias="JWT_EXPIRE_MINUTES")

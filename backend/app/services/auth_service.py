@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-import aiosqlite
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -41,7 +40,8 @@ def verify_password(password: str, password_hash: str) -> bool:
 def create_access_token(subject: str) -> str:
     expires = datetime.now(UTC) + timedelta(minutes=settings.jwt_expire_minutes)
     # Convert datetime to Unix timestamp (integer) for JSON serialization
-    payload = {"sub": subject, "exp": int(expires.timestamp())}
+    # Ensure subject is a string (handles UUID objects from database)
+    payload = {"sub": str(subject), "exp": int(expires.timestamp())}
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -71,7 +71,8 @@ async def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
             return None
         if not verify_password(password, row["password_hash"]):
             return None
-        return {"id": row["id"], "email": row["email"]}
+        # Ensure id is always a string (handles UUID objects from asyncpg)
+        return {"id": str(row["id"]), "email": row["email"]}
     finally:
         await db.close()
 
@@ -95,6 +96,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict[str, Any
         row = await cur.fetchone()
         if not row:
             raise credentials_exception
-        return {"id": row["id"], "email": row["email"]}
+        # Ensure id is always a string (handles UUID objects from asyncpg)
+        return {"id": str(row["id"]), "email": row["email"]}
     finally:
         await db.close()

@@ -5,7 +5,6 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import aiosqlite
 import pandas as pd
 import yfinance as yf
 from loguru import logger
@@ -15,7 +14,7 @@ from app.services.redis_service import cache_get_json, cache_set_json
 CACHE_TTL = timedelta(hours=1)
 
 
-async def _cache_get(db: aiosqlite.Connection, ticker: str, data_type: str) -> dict[str, Any] | None:
+async def _cache_get(db: Any, ticker: str, data_type: str) -> dict[str, Any] | None:
     cur = await db.execute(
         "SELECT data, fetched_at FROM stock_cache WHERE ticker = ? AND data_type = ?",
         (ticker.upper(), data_type),
@@ -33,7 +32,7 @@ async def _cache_get(db: aiosqlite.Connection, ticker: str, data_type: str) -> d
     return json.loads(row["data"])
 
 
-async def _cache_set(db: aiosqlite.Connection, ticker: str, data_type: str, data: dict[str, Any]) -> None:
+async def _cache_set(db: Any, ticker: str, data_type: str, data: dict[str, Any]) -> None:
     # Use naive UTC datetime for PostgreSQL (remove tzinfo before storing)
     # This ensures consistency with what comes back from the DB
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -61,7 +60,7 @@ def _yf_info_sync(ticker: str) -> dict[str, Any]:
     return dict(info)
 
 
-async def fetch_price_history(db: aiosqlite.Connection | None, ticker: str, period: str = "1y") -> pd.DataFrame:
+async def fetch_price_history(db: Any | None, ticker: str, period: str = "1y") -> pd.DataFrame:
     ticker = ticker.upper()
     redis_key = f"stock:{ticker}:price:{period}"
     redis_cached = await cache_get_json(redis_key)
@@ -106,7 +105,7 @@ async def fetch_price_history(db: aiosqlite.Connection | None, ticker: str, peri
     return out
 
 
-async def fetch_stock_info(db: aiosqlite.Connection | None, ticker: str) -> dict[str, Any]:
+async def fetch_stock_info(db: Any | None, ticker: str) -> dict[str, Any]:
     ticker = ticker.upper()
     redis_key = f"stock:{ticker}:info"
     redis_hit = await cache_get_json(redis_key)
@@ -138,7 +137,7 @@ async def fetch_stock_info(db: aiosqlite.Connection | None, ticker: str) -> dict
 
 
 async def build_market_row(
-    db: aiosqlite.Connection | None,
+    db: Any | None,
     ticker: str,
 ) -> dict[str, Any]:
     ticker = ticker.upper()

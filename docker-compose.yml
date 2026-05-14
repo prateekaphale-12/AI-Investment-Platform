@@ -25,6 +25,10 @@ services:
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
       DATABASE_URL: postgresql://ai_app:Cr7m10p7!!@postgres:5432/ai_investment
       REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: AIzaSyC9hhaZsxIGRIrsrR3lrG9trIzDp_TuLCY
+      GEMINI_MODEL: gemini-2.0-flash
+      ALPHA_VANTAGE_KEY: J0RMGODDUVCQ5FG2
+      NEWSAPI_KEY: 29c2a80f3a02489d89f671b696499016
     volumes:
       - backend_data:/app/data
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000

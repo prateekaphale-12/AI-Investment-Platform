@@ -114,10 +114,27 @@ export async function me() {
 export async function getDailySnapshot() {
   const { data } = await api.get<{
     snapshot_date: string;
-    picks: Array<{ ticker: string; current_price: number; ytd_return_pct: number }>;
+    picks: Array<{ ticker: string; current_price?: number; ytd_return_pct: number }>;
     gainers: Array<{ ticker: string; ytd_return_pct: number }>;
     losers: Array<{ ticker: string; ytd_return_pct: number }>;
     metrics: { universe_count: number; avg_return_pct: number };
+    top_news?: Record<string, Array<{
+      title: string;
+      url: string;
+      source: string;
+      published_at: string;
+      summary?: string;
+      image?: string;
+      sentiment?: string;
+    }>>;
+    market_news?: Array<{
+      title: string;
+      url: string;
+      source: string;
+      published_at: string;
+      summary?: string;
+      image?: string;
+    }>;
   }>("/api/v1/market/daily-snapshot");
   return data;
 }
@@ -139,4 +156,30 @@ export async function saveLLMSettings(provider: string, apiKey: string) {
     api_key: apiKey
   });
   return data;
+}
+
+// Analysis History
+export async function listAnalyses(limit: number = 50, offset: number = 0) {
+  const { data } = await api.get<{
+    items: Array<{
+      id: string;
+      status: string;
+      summary: any;
+      created_at: string;
+      completed_at: string | null;
+    }>;
+    count: number;
+  }>("/api/v1/analysis", { params: { limit, offset } });
+  return data;
+}
+
+export async function deleteAnalysis(sessionId: string) {
+  await api.delete(`/api/v1/analysis/${sessionId}`);
+}
+
+export async function downloadAnalysisPDF(sessionId: string) {
+  const response = await api.get(`/api/v1/analysis/${sessionId}/export/pdf`, {
+    responseType: "blob",
+  });
+  return response.data;
 }

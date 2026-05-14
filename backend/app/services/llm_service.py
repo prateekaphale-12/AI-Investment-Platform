@@ -106,7 +106,9 @@ async def generate_investment_report(
 ) -> str:
     """Generate investment report using specified provider"""
     try:
-        return await generate_with_provider(provider, prompt, api_key, temperature=0.4, max_tokens=8192)
+        # Reduce max_tokens to stay within Groq free tier (6000 TPM limit)
+        # With prompt + response, keep total under 5000 tokens
+        return await generate_with_provider(provider, prompt, api_key, temperature=0.4, max_tokens=2048)
     except Exception as e:
         logger.exception(f"Investment report generation failed with {provider}: {e}")
         return f"## Report generation error\n\n{e!s}\n\n---\n\n{prompt[:2000]}"
@@ -119,7 +121,8 @@ async def generate_ticker_summaries(
 ) -> str:
     """Generate ticker summaries using specified provider"""
     try:
-        return await generate_with_provider(provider, prompt, api_key, temperature=0.35, max_tokens=4096)
+        # Reduce max_tokens to stay within Groq free tier
+        return await generate_with_provider(provider, prompt, api_key, temperature=0.35, max_tokens=1024)
     except Exception as e:
         logger.exception(f"Ticker summaries failed with {provider}: {e}")
         return ""
