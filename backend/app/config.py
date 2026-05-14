@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # News API Keys (free tiers)
     alpha_vantage_key: str = Field(default="", validation_alias="ALPHA_VANTAGE_KEY")
     newsapi_key: str = Field(default="", validation_alias="NEWSAPI_KEY")
+    finnhub_key: str = Field(default="", validation_alias="FINNHUB_KEY")
     
     jwt_secret_key: str = Field(default="change-me", validation_alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")

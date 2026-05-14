@@ -29,6 +29,7 @@ services:
       GEMINI_MODEL: gemini-2.0-flash
       ALPHA_VANTAGE_KEY: J0RMGODDUVCQ5FG2
       NEWSAPI_KEY: 29c2a80f3a02489d89f671b696499016
+      FINNHUB_KEY: "d82nf61r01qmgc0gqe10d82nf61r01qmgc0gqe1g"
     volumes:
       - backend_data:/app/data
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000

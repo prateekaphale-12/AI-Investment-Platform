@@ -20,15 +20,17 @@ class NewsAggregator:
     def __init__(self):
         self.alpha_vantage_key = getattr(settings, "alpha_vantage_key", "")
         self.newsapi_key = getattr(settings, "newsapi_key", "")
+        self.finnhub_key = getattr(settings, "finnhub_key", "")
 
     async def get_ticker_news(self, ticker: str, limit: int = 5) -> list[dict[str, Any]]:
         """Get latest news for a ticker from multiple sources"""
         try:
-            logger.info(f"Fetching news for {ticker} (Alpha Vantage key: {bool(self.alpha_vantage_key)}, NewsAPI key: {bool(self.newsapi_key)})")
+            logger.info(f"Fetching news for {ticker} (Alpha Vantage: {bool(self.alpha_vantage_key)}, NewsAPI: {bool(self.newsapi_key)}, Finnhub: {bool(self.finnhub_key)})")
             
             tasks = [
                 self._get_alpha_vantage_news(ticker, limit),
                 self._get_newsapi_news(ticker, limit),
+                self._get_finnhub_news(ticker, limit),
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -217,6 +219,55 @@ class NewsAggregator:
                     return filtered_news
         except Exception as e:
             logger.warning(f"Market news failed: {e}")
+            return []
+
+
+    async def _get_finnhub_news(self, ticker: str, limit: int) -> list[dict[str, Any]]:
+        """Get news from Finnhub (free tier: 60 calls/minute)"""
+        if not self.finnhub_key:
+            logger.warning("Finnhub key not configured")
+            return []
+
+        try:
+            # Get news from last 7 days
+            from_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            to_date = datetime.now().strftime("%Y-%m-%d")
+            
+            url = "https://finnhub.io/api/v1/company-news"
+            params = {
+                "symbol": ticker,
+                "from": from_date,
+                "to": to_date,
+                "token": self.finnhub_key,
+            }
+
+            logger.info(f"Calling Finnhub for {ticker}")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    logger.info(f"Finnhub response status: {resp.status}")
+                    if resp.status != 200:
+                        logger.warning(f"Finnhub returned {resp.status}")
+                        return []
+
+                    data = await resp.json()
+                    logger.info(f"Finnhub returned {len(data)} articles for {ticker}")
+
+                    news = []
+                    for item in data[:limit]:
+                        news.append(
+                            {
+                                "title": item.get("headline", ""),
+                                "url": item.get("url", ""),
+                                "source": item.get("source", "Finnhub"),
+                                "published_at": datetime.fromtimestamp(item.get("datetime", 0)).isoformat() if item.get("datetime") else "",
+                                "summary": item.get("summary", ""),
+                                "image": item.get("image", ""),
+                                "category": item.get("category", ""),
+                            }
+                        )
+                    return news
+        except Exception as e:
+            logger.warning(f"Finnhub news failed: {e}")
             return []
 
 

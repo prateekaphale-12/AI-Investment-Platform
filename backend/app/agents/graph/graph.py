@@ -6,7 +6,9 @@ import asyncpg
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.graph.nodes import (
+    confidence_analysis_node,
     financial_analysis_node,
+    macro_analysis_node,
     market_research_node,
     news_sentiment_node,
     planner_node,
@@ -25,7 +27,9 @@ def build_analysis_graph() -> Any:
     g.add_node("financial_analysis", financial_analysis_node)
     g.add_node("technical_analysis", technical_analysis_node)
     g.add_node("news_sentiment", news_sentiment_node)
+    g.add_node("macro_analysis", macro_analysis_node)
     g.add_node("risk_analysis", risk_analysis_node)
+    g.add_node("confidence_analysis", confidence_analysis_node)
     g.add_node("portfolio_allocation", portfolio_allocation_node)
     g.add_node("report_generation", report_generation_node)
 
@@ -34,8 +38,10 @@ def build_analysis_graph() -> Any:
     g.add_edge("market_research", "financial_analysis")
     g.add_edge("financial_analysis", "technical_analysis")
     g.add_edge("technical_analysis", "news_sentiment")
-    g.add_edge("news_sentiment", "risk_analysis")
-    g.add_edge("risk_analysis", "portfolio_allocation")
+    g.add_edge("news_sentiment", "macro_analysis")
+    g.add_edge("macro_analysis", "risk_analysis")
+    g.add_edge("risk_analysis", "confidence_analysis")
+    g.add_edge("confidence_analysis", "portfolio_allocation")
     g.add_edge("portfolio_allocation", "report_generation")
     g.add_edge("report_generation", END)
 

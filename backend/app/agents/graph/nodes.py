@@ -8,11 +8,13 @@ from loguru import logger
 
 from app.agents.graph.state import AgentState
 from app.services import analysis_db as adb
+from app.services.enhanced_sentiment_service import get_sentiment_with_macro_context
 from app.services.llm_service import (
     generate_investment_report,
     generate_json_object,
     generate_ticker_summaries,
 )
+from app.services.macro_intelligence_service import get_macro_context
 from app.services.portfolio_service import build_allocations
 from app.services.rationale_builder import (
     describe_fundamentals,
@@ -62,45 +64,126 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> dict[str, A
         ui = state.get("user_input") or {}
         interests = ui.get("interests") or []
         risk = ui.get("risk_tolerance") or "medium"
-        normalized_interests = list(interests)
-        ai_reason = ""
+        goal = ui.get("goal") or "growth"
+        horizon = ui.get("investment_horizon") or "1 year"
+        budget = ui.get("budget") or 10000
         
         # Extract LLM settings from state
         provider, api_key = _extract_llm_config(state)
         
+        logger.info(f"🧠 INTELLIGENT PLANNER: Starting deep stock selection for {risk} risk, {goal} goal, {horizon} horizon")
+        
+        # Step 1: Normalize sectors
         ai_norm = await generate_json_object(
             (
                 "Normalize investment interests to sector labels from allowed list.\n"
                 f"Allowed sectors: {available_sectors()}.\n"
                 f"Input interests: {interests}\n"
-                f"Goal: {ui.get('goal')}; horizon: {ui.get('investment_horizon')}; risk: {risk}\n"
+                f"Goal: {goal}; horizon: {horizon}; risk: {risk}\n"
                 'Return object: {"normalized_interests": ["..."], "reason": "..."}'
             ),
             provider=provider,
             api_key=api_key
         )
+        
+        normalized_interests = list(interests)
         if ai_norm:
             candidate = ai_norm.get("normalized_interests")
             if isinstance(candidate, list):
                 filtered = [str(x).strip().lower() for x in candidate if str(x).strip().lower() in available_sectors()]
                 if filtered:
                     normalized_interests = filtered
-            ai_reason = str(ai_norm.get("reason", "")).strip()
-        picks = tickers_for_interests(normalized_interests)
-        cap = {"low": 5, "medium": 6, "high": 8}.get(risk, 6)
-        universe = picks[:cap]
-        strategy = (
-            f"Universe of {len(universe)} liquid US equities aligned to interests {normalized_interests!r} "
-            f"and {risk} risk posture."
+        
+        logger.info(f"📊 Normalized sectors: {normalized_interests}")
+        
+        # Step 2: Get ALL candidate stocks from selected sectors (20-30 candidates)
+        all_candidates = tickers_for_interests(normalized_interests)
+        logger.info(f"🎯 Stage 0: {len(all_candidates)} candidate stocks from selected sectors")
+        
+        # Step 3: INTELLIGENT TWO-STAGE SCREENING
+        from app.services.intelligent_screener import intelligent_stock_screening
+        
+        user_profile = {
+            "risk_tolerance": risk,
+            "goal": goal,
+            "investment_horizon": horizon,
+            "budget": budget,
+            "sectors": normalized_interests,
+        }
+        
+        # Create LLM generate function wrapper
+        async def llm_generate_wrapper(prompt: str, max_tokens: int = 2048):
+            return await generate_json_object(
+                prompt,
+                max_tokens=max_tokens,
+                provider=provider,
+                api_key=api_key
+            )
+        
+        # Run intelligent screening
+        screening_result = await intelligent_stock_screening(
+            user_profile,
+            all_candidates,
+            llm_generate_wrapper
         )
-        if ai_reason:
-            strategy += f" AI planning rationale: {ai_reason}"
+        
+        universe = screening_result["selected_stocks"]
+        stock_analysis = screening_result["stock_analysis"]
+        screening_report = screening_result["screening_report"]
+        
+        logger.info(f"✅ INTELLIGENT SCREENING COMPLETE:")
+        logger.info(f"   Stage 1: {screening_report['stage1_candidates']} → {screening_report['stage2_analyzed']} candidates")
+        logger.info(f"   Stage 2: {screening_report['stage2_analyzed']} → {screening_report['final_selected']} selected")
+        logger.info(f"   Final portfolio: {', '.join(universe)}")
+        
+        # Build comprehensive strategy report
+        strategy_parts = [
+            f"🎯 INTELLIGENT STOCK SELECTION REPORT",
+            f"",
+            f"SCREENING PROCESS:",
+            f"• Stage 1 (Broad Filter): {screening_report['stage1_candidates']} candidates → {screening_report['stage2_analyzed']} passed basic criteria",
+            f"• Stage 2 (Deep AI Analysis): Each stock scored 0-100 based on user profile fit",
+            f"• Stage 3 (Final Selection): Top {screening_report['final_selected']} stocks selected",
+            f"",
+            f"SCREENING CRITERIA: {screening_report['screening_criteria']}",
+            f"",
+            f"SELECTED STOCKS & ANALYSIS:",
+        ]
+        
+        for ticker in universe:
+            if ticker in stock_analysis:
+                analysis = stock_analysis[ticker]
+                score = analysis.get("score", 0)
+                reasoning = analysis.get("reasoning", "")
+                key_factors = analysis.get("key_factors", [])
+                risks = analysis.get("risks", [])
+                catalysts = analysis.get("catalysts", [])
+                
+                strategy_parts.append(f"")
+                strategy_parts.append(f"📈 {ticker} (Score: {score}/100)")
+                strategy_parts.append(f"   Reasoning: {reasoning}")
+                if key_factors:
+                    strategy_parts.append(f"   ✓ Key Factors: {', '.join(key_factors)}")
+                if catalysts:
+                    strategy_parts.append(f"   🚀 Catalysts: {', '.join(catalysts)}")
+                if risks:
+                    strategy_parts.append(f"   ⚠️  Risks: {', '.join(risks)}")
+        
+        strategy = "\n".join(strategy_parts)
+        
         await adb.set_agent_status(db, session_id, "planner", "completed")
         return {"stock_universe": universe, "strategy": strategy}
     except Exception as e:
         logger.exception("planner_node: {}", e)
         await adb.set_agent_status(db, session_id, "planner", "failed", str(e))
-        return {"stock_universe": [], "strategy": "", "errors": [f"planner: {e!s}"], "status": "failed"}
+        # Fallback to simple selection
+        picks = tickers_for_interests(interests or [])
+        cap = {"low": 5, "medium": 6, "high": 8}.get(risk, 6)
+        return {
+            "stock_universe": picks[:cap],
+            "strategy": f"Fallback: Selected {cap} stocks from {interests}. (Intelligent screening failed: {str(e)})",
+            "errors": [f"planner: {e!s}"]
+        }
 
 
 async def market_research_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -199,17 +282,29 @@ async def news_sentiment_node(state: AgentState, config: RunnableConfig) -> dict
     await adb.set_agent_status(db, session_id, "news_sentiment", "running")
     try:
         tickers = state.get("stock_universe") or []
-        sentiments = await asyncio.gather(*(analyze_headline_sentiment(t) for t in tickers))
+        
+        # Use enhanced sentiment analysis from the start
+        from app.services.enhanced_sentiment_service import analyze_headline_sentiment_enhanced
+        
+        sentiments = await asyncio.gather(*(analyze_headline_sentiment_enhanced(t) for t in tickers))
         sentiment_data = {t: s for t, s in zip(tickers, sentiments, strict=True)}
+        
+        # Extract LLM config for AI news generation
+        provider, api_key = _extract_llm_config(state)
+        
         for t in tickers:
             s = sentiment_data.get(t) or {}
             ai_news = await generate_json_object(
                 (
                     f"Ticker: {t}\n"
                     f"Sentiment facts: label={s.get('label')}, compound={s.get('compound')}, headlines_used={s.get('headlines_used')}\n"
+                    f"Event types: {', '.join(s.get('event_types', []))}\n"
+                    f"Sentiment consistency: {s.get('sentiment_consistency', 0)}\n"
                     'Return: {"event_summary":"short","risk_flag":"low|medium|high"}'
                 ),
                 max_tokens=384,
+                provider=provider,
+                api_key=api_key,
             )
             if ai_news:
                 s["event_summary"] = str(ai_news.get("event_summary", ""))[:220]
@@ -221,6 +316,46 @@ async def news_sentiment_node(state: AgentState, config: RunnableConfig) -> dict
         logger.exception("news_sentiment_node: {}", e)
         await adb.set_agent_status(db, session_id, "news_sentiment", "failed", str(e))
         return {"sentiment_data": {}, "errors": [f"news_sentiment: {e!s}"]}
+
+
+async def macro_analysis_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    """Analyze macro environment and update sentiment with macro context."""
+    db, session_id = _cfg(config)
+    await adb.set_agent_status(db, session_id, "macro_analysis", "running")
+    try:
+        # Get macro context
+        macro_context = await get_macro_context()
+        
+        # Update sentiment data with macro context
+        tickers = state.get("stock_universe") or []
+        sentiment_data = state.get("sentiment_data") or {}
+        
+        # Re-analyze sentiment with macro context for each ticker
+        for ticker in tickers:
+            enhanced_sentiment = await get_sentiment_with_macro_context(
+                ticker,
+                macro_context=macro_context,
+            )
+            sentiment_data[ticker] = enhanced_sentiment
+        
+        await adb.set_agent_status(db, session_id, "macro_analysis", "completed")
+        return {
+            "sentiment_data": sentiment_data,
+            "macro_context": macro_context,
+        }
+    except Exception as e:
+        logger.exception("macro_analysis_node: {}", e)
+        await adb.set_agent_status(db, session_id, "macro_analysis", "failed", str(e))
+        # Return default macro context on error
+        return {
+            "macro_context": {
+                "interest_rate_regime": "moderate",
+                "volatility_regime": "moderate",
+                "market_regime": "bull",
+                "risk_sentiment": "risk_neutral",
+            },
+            "errors": [f"macro_analysis: {e!s}"],
+        }
 
 
 async def risk_analysis_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -267,6 +402,44 @@ async def risk_analysis_node(state: AgentState, config: RunnableConfig) -> dict[
         return {"risk_data": {}, "errors": [f"risk_analysis: {e!s}"]}
 
 
+async def confidence_analysis_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    """Calculate multi-factor confidence scores for each ticker."""
+    db, session_id = _cfg(config)
+    await adb.set_agent_status(db, session_id, "confidence_analysis", "running")
+    try:
+        from app.services.confidence_engine import compute_multi_factor_confidence
+        
+        market_data = state.get("market_data") or {}
+        technical_data = state.get("technical_data") or {}
+        sentiment_data = state.get("sentiment_data") or {}
+        financial_data = state.get("financial_data") or {}
+        macro_context = state.get("macro_context") or {}
+        
+        confidence_data: dict[str, dict] = {}
+        
+        for ticker in market_data.keys():
+            tech = technical_data.get(ticker) or {}
+            sent = sentiment_data.get(ticker) or {}
+            fin = financial_data.get(ticker) or {}
+            
+            # Build confidence scores using the confidence engine with macro context
+            conf_scores = compute_multi_factor_confidence(
+                tech=tech,
+                fundamentals=fin,
+                sentiment=sent,
+                macro=macro_context,
+            )
+            
+            confidence_data[ticker] = conf_scores
+        
+        await adb.set_agent_status(db, session_id, "confidence_analysis", "completed")
+        return {"confidence_data": confidence_data}
+    except Exception as e:
+        logger.exception("confidence_analysis_node: {}", e)
+        await adb.set_agent_status(db, session_id, "confidence_analysis", "failed", str(e))
+        return {"confidence_data": {}, "errors": [f"confidence_analysis: {e!s}"]}
+
+
 async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     db, session_id = _cfg(config)
     await adb.set_agent_status(db, session_id, "portfolio_allocation", "running")
@@ -279,6 +452,9 @@ async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -
     sentiment_data = state.get("sentiment_data") or {}
     financial_data = state.get("financial_data") or {}
     risk_data = state.get("risk_data") or {}
+    confidence_data = state.get("confidence_data") or {}
+    selected_sectors = ui.get("interests") or []  # User-selected sectors
+    
     try:
         rows_for_portfolio: list[dict[str, Any]] = []
         for t in tickers:
@@ -288,6 +464,7 @@ async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -
             info = (m.get("info") or {}) if isinstance(m.get("info"), dict) else {}
             fin = financial_data.get(t) or {}
             risk_row = risk_data.get(t) or {}
+            conf = confidence_data.get(t) or {}
             rationale = {
                 "market_trend": describe_market_trend(m),
                 "technical": describe_technical(tech),
@@ -297,7 +474,14 @@ async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -
                 "summary": "",
             }
             rows_for_portfolio.append(
-                {"ticker": t, "market": m, "technical": tech, "sentiment": sent, "rationale": rationale}
+                {
+                    "ticker": t,
+                    "market": m,
+                    "technical": tech,
+                    "sentiment": sent,
+                    "confidence": conf,
+                    "rationale": rationale,
+                }
             )
 
         valid_rows = [
@@ -316,10 +500,12 @@ async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -
                     "market": r["market"],
                     "technical": r["technical"],
                     "sentiment": r["sentiment"],
+                    "confidence": r["confidence"],
                     "rationale": r["rationale"],
                 }
                 for r in use_rows
             ],
+            selected_sectors=selected_sectors if selected_sectors else None,
         )
         ai_decision = await generate_json_object(
             (
@@ -422,7 +608,32 @@ async def report_generation_node(state: AgentState, config: RunnableConfig) -> d
         facts_block.append(
             f"Budget: ${budget:,.2f}; Risk: {ui.get('risk_tolerance')}; Goal: {ui.get('goal')}"
         )
-        facts_block.append("ALLOCATIONS:")
+        
+        # Add macro context if available
+        macro_context = state.get("macro_context") or {}
+        if macro_context and macro_context.get("data_quality") != "default":
+            facts_block.append("\nMACRO ENVIRONMENT:")
+            facts_block.append(f"  Interest Rate Regime: {macro_context.get('interest_rate_regime', 'N/A')}")
+            facts_block.append(f"  Volatility Regime: {macro_context.get('volatility_regime', 'N/A')}")
+            facts_block.append(f"  Market Regime: {macro_context.get('market_regime', 'N/A')}")
+            facts_block.append(f"  Risk Sentiment: {macro_context.get('risk_sentiment', 'N/A')}")
+            facts_block.append(f"  Sector Rotation: {macro_context.get('sector_rotation', 'N/A')}")
+            facts_block.append(f"  Economic Outlook: {macro_context.get('economic_outlook', 'N/A')}")
+        
+        # Add sector analysis if available
+        if summary and summary.get("sector_analysis"):
+            sector_analysis = summary["sector_analysis"]
+            facts_block.append("\nSECTOR ANALYSIS:")
+            exposure = sector_analysis.get("validation", {}).get("exposure", {})
+            for sector in sorted(exposure.keys()):
+                facts_block.append(f"  {sector.capitalize()}: {exposure[sector]:.1f}%")
+            
+            if sector_analysis.get("validation", {}).get("warnings"):
+                facts_block.append("\nSector Warnings:")
+                for warning in sector_analysis["validation"]["warnings"]:
+                    facts_block.append(f"  - {warning}")
+        
+        facts_block.append("\nALLOCATIONS:")
         for a in allocations_list:
             r = a.get("rationale", {})
             # Truncate rationale to reduce token count

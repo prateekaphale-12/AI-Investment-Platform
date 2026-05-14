@@ -108,28 +108,29 @@ def _signal_from(
     else:
         signal = "mixed"
     
-    # Confidence scoring
-    confidence = 0.5
+    # Confidence scoring (capped at 0.6 - technical alone should never be >60% confident)
+    confidence = 0.4
     
     # Agreement between momentum and trend increases confidence
     if macd_bullish == trend_bullish:
-        confidence += 0.2
+        confidence += 0.1
     
     # Long-term trend alignment increases confidence
     if long_term_bullish is not None:
         if (macd_bullish and long_term_bullish) or (not macd_bullish and not long_term_bullish):
-            confidence += 0.15
+            confidence += 0.08
     
     # Neutral extension increases confidence (no overextension)
     if extension == "neutral":
-        confidence += 0.1
+        confidence += 0.05
     
+    # Cap at 0.6 (technical alone should never exceed 60% confidence)
     return {
         "signal": signal,
         "trend": "bullish" if trend_bullish else "bearish",
         "momentum": "bullish" if macd_bullish else "bearish",
         "extension": extension,
-        "confidence": round(min(confidence, 1.0), 2),
+        "confidence": round(min(confidence, 0.6), 2),
         "long_term_trend": "bullish" if long_term_bullish else ("bearish" if sma200 is not None else "unknown"),
     }
 
