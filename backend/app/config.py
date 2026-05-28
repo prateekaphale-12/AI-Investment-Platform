@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     newsapi_key: str = Field(default="", validation_alias="NEWSAPI_KEY")
     finnhub_key: str = Field(default="", validation_alias="FINNHUB_KEY")
     
+    @property
+    def finnhub_api_key(self) -> str:
+        """Alias for finnhub_key for consistency"""
+        return self.finnhub_key
+    
     jwt_secret_key: str = Field(default="change-me", validation_alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     jwt_expire_minutes: int = Field(default=60 * 24, validation_alias="JWT_EXPIRE_MINUTES")

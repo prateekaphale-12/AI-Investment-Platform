@@ -126,11 +126,24 @@ class NewsAggregator:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     logger.info(f"NewsAPI response status: {resp.status}")
+                    
+                    # Handle rate limiting (429) gracefully
+                    if resp.status == 429:
+                        logger.warning(f"NewsAPI rate limited (429) for {ticker} - skipping")
+                        return []
+                    
                     if resp.status != 200:
                         logger.warning(f"NewsAPI returned {resp.status}")
                         return []
 
                     data = await resp.json()
+                    
+                    # Check for API error response
+                    if data.get("status") == "error":
+                        error_code = data.get("code", "unknown")
+                        logger.warning(f"NewsAPI error: {error_code} - {data.get('message', '')}")
+                        return []
+                    
                     articles = data.get("articles", [])
                     logger.info(f"NewsAPI returned {len(articles)} articles for {ticker}")
 
@@ -152,32 +165,58 @@ class NewsAggregator:
             logger.warning(f"NewsAPI failed: {e}")
             return []
 
-    async def get_market_news(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Get general market news - filtered for stock/market relevance"""
+    async def get_market_news(self, limit: int = 10, category: str = "general") -> list[dict[str, Any]]:
+        """Get general market news - filtered for stock/market relevance by category"""
         if not self.newsapi_key:
+            logger.warning("NewsAPI key not configured - returning empty news")
             return []
+
+        # Category keywords mapping
+        category_keywords = {
+            "general": "stock market stocks trading finance earnings investment portfolio",
+            "finance": "finance banking financial services investment portfolio dividend bonds",
+            "it": "technology tech software IT hardware AI artificial intelligence cloud computing",
+            "healthcare": "healthcare health medical pharma biotech medicine hospital",
+            "energy": "energy oil gas renewable solar wind power utilities",
+            "real_estate": "real estate property housing construction development",
+        }
+
+        query = category_keywords.get(category, category_keywords["general"])
 
         try:
             url = "https://newsapi.org/v2/everything"
             params = {
-                "q": "stock market stocks trading finance earnings investment portfolio",
+                "q": query,
                 "sortBy": "publishedAt",
                 "language": "en",
                 "apikey": self.newsapi_key,
                 "pageSize": limit * 2,  # Fetch more to filter
             }
 
-            logger.info("Calling NewsAPI for market news")
+            logger.info(f"Calling NewsAPI for market news (category: {category})")
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     logger.info(f"NewsAPI market news response status: {resp.status}")
+                    
+                    # Handle rate limiting (429) gracefully - return empty instead of failing
+                    if resp.status == 429:
+                        logger.warning(f"NewsAPI rate limited (429) for market news category: {category} - returning empty")
+                        return []
+                    
                     if resp.status != 200:
-                        logger.warning(f"NewsAPI returned {resp.status}")
+                        logger.warning(f"NewsAPI returned {resp.status} for category {category}")
                         return []
 
                     data = await resp.json()
+                    
+                    # Check for API error response
+                    if data.get("status") == "error":
+                        error_code = data.get("code", "unknown")
+                        logger.warning(f"NewsAPI error for category {category}: {error_code} - {data.get('message', '')}")
+                        return []
+                    
                     articles = data.get("articles", [])
-                    logger.info(f"NewsAPI returned {len(articles)} articles for market news")
+                    logger.info(f"NewsAPI returned {len(articles)} articles for market news (category: {category})")
 
                     # Filter for market/stock relevance
                     market_keywords = {
@@ -209,16 +248,17 @@ class NewsAggregator:
                                     "published_at": article.get("publishedAt", ""),
                                     "summary": article.get("description", ""),
                                     "image": article.get("urlToImage", ""),
+                                    "category": category,
                                 }
                             )
                         
                         if len(filtered_news) >= limit:
                             break
                     
-                    logger.info(f"Filtered to {len(filtered_news)} market-relevant articles")
+                    logger.info(f"Filtered to {len(filtered_news)} market-relevant articles (category: {category})")
                     return filtered_news
         except Exception as e:
-            logger.warning(f"Market news failed: {e}")
+            logger.warning(f"Market news failed for category {category}: {e}")
             return []
 
 

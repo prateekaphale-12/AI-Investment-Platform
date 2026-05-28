@@ -286,7 +286,10 @@ async def news_sentiment_node(state: AgentState, config: RunnableConfig) -> dict
         # Use enhanced sentiment analysis from the start
         from app.services.enhanced_sentiment_service import analyze_headline_sentiment_enhanced
         
-        sentiments = await asyncio.gather(*(analyze_headline_sentiment_enhanced(t) for t in tickers))
+        # Get LLM settings for AI news summary generation
+        llm_settings = state.get("llm_settings", {})
+        
+        sentiments = await asyncio.gather(*(analyze_headline_sentiment_enhanced(t, llm_settings) for t in tickers))
         sentiment_data = {t: s for t, s in zip(tickers, sentiments, strict=True)}
         
         # Extract LLM config for AI news generation
@@ -468,7 +471,7 @@ async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -
             rationale = {
                 "market_trend": describe_market_trend(m),
                 "technical": describe_technical(tech),
-                "sentiment": describe_sentiment(sent) + (f"; event: {sent.get('event_summary')}" if sent.get("event_summary") else ""),
+                "sentiment": sent,  # Pass full sentiment data object with news_summary and key_headlines
                 "fundamentals": describe_fundamentals(info) + f"; quality_score {fin.get('quality_score')}",
                 "risk": describe_risk(info, tech) + (f"; scenario: {risk_row.get('scenario_note')}" if risk_row.get("scenario_note") else ""),
                 "summary": "",
@@ -491,6 +494,10 @@ async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -
             and (r.get("market") or {}).get("current_price") is not None
         ]
         use_rows = valid_rows if valid_rows else rows_for_portfolio
+        
+        # Use probabilistic optimizer for 3+ stocks, confidence-driven for smaller portfolios
+        use_probabilistic = len(use_rows) >= 3
+        
         allocations_list, summary = build_allocations(
             budget,
             risk,
@@ -506,6 +513,7 @@ async def portfolio_allocation_node(state: AgentState, config: RunnableConfig) -
                 for r in use_rows
             ],
             selected_sectors=selected_sectors if selected_sectors else None,
+            use_probabilistic=use_probabilistic,
         )
         ai_decision = await generate_json_object(
             (
@@ -639,7 +647,14 @@ async def report_generation_node(state: AgentState, config: RunnableConfig) -> d
             # Truncate rationale to reduce token count
             market = (r.get('market_trend') or "")[:100]
             technical = (r.get('technical') or "")[:100]
-            sentiment = (r.get('sentiment') or "")[:100]
+            
+            # Handle sentiment - can be dict or string
+            sentiment_val = r.get('sentiment') or ""
+            if isinstance(sentiment_val, dict):
+                sentiment = (sentiment_val.get('label', 'neutral') or "")[:100]
+            else:
+                sentiment = (sentiment_val or "")[:100]
+            
             fundamentals = (r.get('fundamentals') or "")[:100]
             risk = (r.get('risk') or "")[:100]
             

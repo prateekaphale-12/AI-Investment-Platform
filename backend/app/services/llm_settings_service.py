@@ -118,13 +118,11 @@ async def get_user_llm_settings(user_id: str) -> Dict[str, Any]:
         decrypted_key = decrypt_api_key(row["api_key_encrypted"])
         
         return {
-            row["provider"]: {
-                "provider": row["provider"],
-                "model": row["model"],
-                "api_key": decrypted_key,
-                "has_api_key": bool(decrypted_key),
-                "updated_at": row["updated_at"]
-            }
+            "provider": row["provider"],
+            "model": row["model"],
+            "api_key": decrypted_key,
+            "has_api_key": bool(decrypted_key),
+            "updated_at": row["updated_at"]
         }
     except Exception as e:
         logger.error(f"Failed to get LLM settings: {e}")

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { TrendingUp, TrendingDown, Activity, DollarSign, ExternalLink } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, DollarSign, ExternalLink, Wifi, WifiOff } from "lucide-react";
 
 import {
   downloadAnalysisPDF,
@@ -19,6 +19,12 @@ import type { Allocation } from "../components/PortfolioResults";
 import { PortfolioResults } from "../components/PortfolioResults";
 import { QueryForm } from "../components/QueryForm";
 import { StockPriceChart } from "../components/StockPriceChart";
+import { InfiniteStocksList } from "../components/InfiniteStocksList";
+import { CategorizedNewsList } from "../components/CategorizedNewsList";
+import { LiveTickerTape } from "../components/LiveTickerTape";
+import { MarketSentimentMeter } from "../components/MarketSentimentMeter";
+import { EventAlertToast } from "../components/EventAlertToast";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 export function HomePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -31,11 +37,11 @@ export function HomePage() {
     status: string;
     errors?: string[];
   } | null>(null);
-  const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null);
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
   const [snapshot, setSnapshot] = useState<{
-    picks: Array<{ ticker: string; ytd_return_pct: number }>;
-    gainers: Array<{ ticker: string; ytd_return_pct: number }>;
-    losers: Array<{ ticker: string; ytd_return_pct: number }>;
+    picks: Array<{ ticker: string; ytd_return_pct: number; current_price?: number; company_name?: string }>;
+    gainers: Array<{ ticker: string; ytd_return_pct: number; current_price?: number; company_name?: string }>;
+    losers: Array<{ ticker: string; ytd_return_pct: number; current_price?: number; company_name?: string }>;
     metrics: { universe_count: number; avg_return_pct: number };
     top_news?: Record<string, Array<{
       title: string;
@@ -58,6 +64,9 @@ export function HomePage() {
   const [snapshotLoading, setSnapshotLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
+  // WebSocket connection for real-time updates (disabled for now - not critical for initial load)
+  const { isConnected, connectionStatus } = useWebSocket({ autoConnect: false });
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -69,15 +78,24 @@ export function HomePage() {
   useEffect(() => () => stopPoll(), [stopPoll]);
   useEffect(() => {
     let mounted = true;
-    getCapabilities()
-      .then((c) => {
-        if (mounted) setGeminiConfigured(c.gemini_configured);
-      })
-      .catch(() => {
-        if (mounted) setGeminiConfigured(null);
-      });
+    const checkCapabilities = () => {
+      getCapabilities()
+        .then((c) => {
+          if (mounted) setAiConfigured(c.ai_configured as boolean);
+        })
+        .catch(() => {
+          if (mounted) setAiConfigured(null);
+        });
+    };
+    
+    checkCapabilities();
+    
+    // Refresh capabilities every 5 seconds to detect when user saves AI config
+    const interval = setInterval(checkCapabilities, 5000);
+    
     return () => {
       mounted = false;
+      clearInterval(interval);
     };
   }, []);
   useEffect(() => {
@@ -177,79 +195,44 @@ export function HomePage() {
   ) : [];
 
   return (
-    <div className="space-y-6">
-      {/* Hero Section with News Ticker */}
+    <div className="space-y-8">
+      {/* Event Alert Toasts */}
+      <EventAlertToast />
+      
+      {/* Hero Section */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/50 via-slate-900/80 to-slate-950"
+        className="relative overflow-hidden rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/30 via-slate-900/50 to-slate-950/30 backdrop-blur-xl shadow-2xl shadow-indigo-500/10"
       >
-        <div className="relative z-10 p-6 md:p-8">
+        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-purple-500/5"></div>
+        <div className="relative z-10 p-8">
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-white md:text-3xl">
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
                   Portfolio Intelligence
                 </h1>
                 <AnimatePresence mode="wait">
-                  {geminiConfigured === true ? (
+                  {aiConfigured === false ? (
                     <motion.span
                       initial={{ scale: 0.8, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
-                      className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300 border border-emerald-500/30"
+                      className="rounded-full bg-amber-500/15 px-4 py-1.5 text-xs font-semibold text-amber-300 border border-amber-500/30 shadow-lg shadow-amber-500/10"
                     >
-                      ✓ AI Enabled
-                    </motion.span>
-                  ) : geminiConfigured === false ? (
-                    <motion.span
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-300 border border-amber-500/30"
-                    >
-                      ⚠ Fallback Mode
+                      ⚠ Configure AI
                     </motion.span>
                   ) : null}
                 </AnimatePresence>
               </div>
-              <p className="mt-2 max-w-2xl text-sm text-slate-300">
+              <p className="mt-3 max-w-3xl text-sm text-slate-400 leading-relaxed">
                 Institutional-grade research powered by deterministic data and AI narrative synthesis.
               </p>
             </div>
+            
+            {/* WebSocket Connection Status - HIDDEN */}
           </div>
         </div>
-
-        {/* News Ticker */}
-        {allNews.length > 0 && (
-          <div className="relative border-t border-indigo-500/10 bg-slate-950/50 backdrop-blur-sm overflow-hidden">
-            <div className="flex items-center gap-2 px-6 py-2">
-              <Activity className="h-4 w-4 text-indigo-400 flex-shrink-0" />
-              <div className="flex-1 overflow-hidden">
-                <motion.div
-                  className="flex gap-8"
-                  animate={{ x: [0, -1000] }}
-                  transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-                >
-                  {[...allNews, ...allNews].map((article, idx) => (
-                    <a
-                      key={idx}
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 whitespace-nowrap text-xs text-slate-400 hover:text-indigo-300 transition"
-                    >
-                      <span className="font-mono font-bold text-indigo-400">{article.ticker}</span>
-                      <span>•</span>
-                      <span>{article.title}</span>
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ))}
-                </motion.div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-indigo-500/10 to-transparent"></div>
       </motion.div>
 
       {/* Market Overview Dashboard */}
@@ -260,141 +243,97 @@ export function HomePage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+          className="grid gap-6 md:grid-cols-2 xl:grid-cols-4"
         >
-          {/* Top Picks Card */}
-          <motion.div
-            whileHover={{ scale: 1.02, y: -4 }}
-            transition={{ type: "spring", stiffness: 300 }}
-            className="group relative overflow-hidden rounded-xl border border-slate-800 bg-gradient-to-br from-slate-900/60 to-slate-950/60 p-5 backdrop-blur"
-          >
-            <div className="absolute right-0 top-0 h-20 w-20 bg-indigo-500/5 blur-2xl"></div>
-            <div className="relative">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Top Picks</h3>
-                <TrendingUp className="h-5 w-5 text-indigo-400" />
-              </div>
-              <div className="space-y-2.5">
-                {snapshot.picks.map((p, idx) => (
-                  <motion.div
-                    key={p.ticker}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                    className="flex items-center justify-between"
-                  >
-                    <span className="font-mono text-sm font-bold text-white">{p.ticker}</span>
-                    <span
-                      className={`font-mono text-sm font-semibold ${
-                        (p.ytd_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
-                      }`}
-                    >
-                      {(p.ytd_return_pct ?? 0) > 0 ? "+" : ""}
-                      {(p.ytd_return_pct ?? 0).toFixed(1)}%
-                    </span>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
+          {/* Top Picks Card - NO SCROLL (fixed 5 items) */}
+          <InfiniteStocksList
+            category="picks"
+            title="Top Picks"
+            icon={<TrendingUp className="h-5 w-5 text-indigo-400" />}
+            colorClass="text-indigo-400"
+            borderColorClass="border-slate-800/50"
+            hoverBorderClass="border-indigo-500/30"
+            hoverShadowClass="shadow-2xl"
+            isFixed={true}
+            maxHeight="auto"
+          />
 
           {/* Top Gainers Card */}
-          <motion.div
-            whileHover={{ scale: 1.02, y: -4 }}
-            transition={{ type: "spring", stiffness: 300 }}
-            className="group relative overflow-hidden rounded-xl border border-slate-800 bg-gradient-to-br from-slate-900/60 to-slate-950/60 p-5 backdrop-blur"
-          >
-            <div className="absolute right-0 top-0 h-20 w-20 bg-emerald-500/5 blur-2xl"></div>
-            <div className="relative">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400">Top Gainers</h3>
-                <TrendingUp className="h-5 w-5 text-emerald-400" />
-              </div>
-              <div className="space-y-2.5">
-                {snapshot.gainers.slice(0, 4).map((g, idx) => (
-                  <motion.div
-                    key={g.ticker}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                    className="flex items-center justify-between"
-                  >
-                    <span className="font-mono text-sm text-slate-300">{g.ticker}</span>
-                    <span className="font-mono text-sm font-semibold text-emerald-400">
-                      +{(g.ytd_return_pct ?? 0).toFixed(1)}%
-                    </span>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
+          <InfiniteStocksList
+            category="gainers"
+            title="Top Gainers"
+            icon={<TrendingUp className="h-5 w-5 text-emerald-400" />}
+            colorClass="text-emerald-400"
+            borderColorClass="border-slate-800/50"
+            hoverBorderClass="border-emerald-500/30"
+            hoverShadowClass="shadow-emerald-500/10"
+          />
 
           {/* Top Losers Card */}
-          <motion.div
-            whileHover={{ scale: 1.02, y: -4 }}
-            transition={{ type: "spring", stiffness: 300 }}
-            className="group relative overflow-hidden rounded-xl border border-slate-800 bg-gradient-to-br from-slate-900/60 to-slate-950/60 p-5 backdrop-blur"
-          >
-            <div className="absolute right-0 top-0 h-20 w-20 bg-red-500/5 blur-2xl"></div>
-            <div className="relative">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-red-400">Top Losers</h3>
-                <TrendingDown className="h-5 w-5 text-red-400" />
-              </div>
-              <div className="space-y-2.5">
-                {snapshot.losers.slice(0, 4).map((l, idx) => (
-                  <motion.div
-                    key={l.ticker}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                    className="flex items-center justify-between"
-                  >
-                    <span className="font-mono text-sm text-slate-300">{l.ticker}</span>
-                    <span className="font-mono text-sm font-semibold text-red-400">
-                      {(l.ytd_return_pct ?? 0).toFixed(1)}%
-                    </span>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
+          <InfiniteStocksList
+            category="losers"
+            title="Top Losers"
+            icon={<TrendingDown className="h-5 w-5 text-red-400" />}
+            colorClass="text-red-400"
+            borderColorClass="border-slate-800/50"
+            hoverBorderClass="border-red-500/30"
+            hoverShadowClass="shadow-red-500/10"
+          />
 
           {/* Market Metrics Card */}
           <motion.div
             whileHover={{ scale: 1.02, y: -4 }}
             transition={{ type: "spring", stiffness: 300 }}
-            className="group relative overflow-hidden rounded-xl border border-slate-800 bg-gradient-to-br from-slate-900/60 to-slate-950/60 p-5 backdrop-blur"
+            className="group relative overflow-hidden rounded-2xl border border-slate-800/50 bg-gradient-to-br from-slate-900/40 to-slate-950/40 p-6 backdrop-blur-xl shadow-xl hover:shadow-2xl hover:shadow-slate-500/10 hover:border-slate-500/30 flex flex-col"
+            style={{ minHeight: "auto" }}
           >
-            <div className="absolute right-0 top-0 h-20 w-20 bg-slate-500/5 blur-2xl"></div>
-            <div className="relative">
-              <div className="mb-4 flex items-center justify-between">
+            <div className="absolute right-0 top-0 h-32 w-32 bg-slate-500/10 blur-3xl group-hover:bg-slate-500/20 transition-all duration-500"></div>
+            <div className="relative flex-1 flex flex-col">
+              <div className="mb-5 flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Market Metrics</h3>
-                <Activity className="h-5 w-5 text-slate-400" />
+                <div className="rounded-lg bg-slate-500/10 p-2">
+                  <Activity className="h-5 w-5 text-slate-400" />
+                </div>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-3">
+                {/* Universe Size */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.1 }}
+                  className="rounded-lg bg-slate-800/30 border border-slate-700/30 p-3"
+                >
+                  <p className="text-xs text-slate-500 mb-1">Universe Size</p>
+                  <p className="font-mono text-lg font-bold text-white">{snapshot.metrics.universe_count}</p>
+                </motion.div>
+
+                {/* Average Return */}
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.2 }}
+                  className="rounded-lg bg-slate-800/30 border border-slate-700/30 p-3"
                 >
-                  <p className="text-xs text-slate-500">Universe Size</p>
-                  <p className="mt-1 font-mono text-2xl font-bold text-white">{snapshot.metrics.universe_count}</p>
-                </motion.div>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.3 }}
-                >
-                  <p className="text-xs text-slate-500">Average Return</p>
+                  <p className="text-xs text-slate-500 mb-1">Avg Return (YTD)</p>
                   <p
-                    className={`mt-1 font-mono text-2xl font-bold ${
+                    className={`font-mono text-lg font-bold ${
                       (snapshot.metrics.avg_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
                     }`}
                   >
                     {(snapshot.metrics.avg_return_pct ?? 0) > 0 ? "+" : ""}
-                    {(snapshot.metrics.avg_return_pct ?? 0).toFixed(2)}%
+                    {((snapshot.metrics.avg_return_pct ?? 0) || 0).toFixed(2)}%
                   </p>
+                </motion.div>
+
+                {/* Top Picks Count */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="rounded-lg bg-slate-800/30 border border-slate-700/30 p-3"
+                >
+                  <p className="text-xs text-slate-500 mb-1">Top Picks</p>
+                  <p className="font-mono text-lg font-bold text-indigo-400">{snapshot.picks.length}</p>
                 </motion.div>
               </div>
             </div>
@@ -402,21 +341,23 @@ export function HomePage() {
         </motion.div>
       ) : null}
 
+      {/* Real-time Market Sentiment Meter - REMOVED */}
+
       {/* Main Content Grid */}
-      <div className="grid gap-6 lg:grid-cols-12">
+      <div className="grid gap-8 xl:grid-cols-12">
         {/* Left Sidebar: Analysis Form */}
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          className="lg:col-span-4"
+          className="xl:col-span-4"
         >
-          <div className="sticky top-6">
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur">
-              <div className="mb-5">
-                <h2 className="text-base font-bold text-white">Configure Analysis</h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  Set your preferences for AI-powered portfolio research
+          <div className="sticky top-24">
+            <div className="rounded-2xl border border-slate-800/50 bg-slate-900/40 p-8 backdrop-blur-xl shadow-2xl">
+              <div className="mb-6">
+                <h2 className="text-lg font-bold text-white">Configure Analysis</h2>
+                <p className="mt-2 text-sm text-slate-400 leading-relaxed">
+                  Set your preferences for AI-powered portfolio research and analysis
                 </p>
               </div>
               <QueryForm onSubmit={(p) => void handleAnalyze(p)} disabled={phase === "loading"} />
@@ -429,7 +370,7 @@ export function HomePage() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.3 }}
-          className="space-y-6 lg:col-span-8"
+          className="space-y-8 xl:col-span-8"
         >
           {/* Loading State */}
           <AnimatePresence>
@@ -595,68 +536,7 @@ export function HomePage() {
               </motion.div>
             ) : (
               /* Market News When No Results */
-              snapshot?.market_news && snapshot.market_news.length > 0 && (
-                <motion.div
-                  key="market-news"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur"
-                >
-                  <h3 className="mb-5 text-sm font-bold text-white">🌍 Market News & Insights</h3>
-                  <div className="space-y-4">
-                    {snapshot.market_news.slice(0, 6).map((article, idx) => (
-                      <motion.a
-                        key={idx}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.1 }}
-                        whileHover={{ scale: 1.02, x: 4 }}
-                        href={article.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group block rounded-lg border border-slate-800 bg-slate-950/50 p-4 transition hover:border-indigo-500/50 hover:bg-slate-900/50"
-                      >
-                        <div className="flex gap-4">
-                          {article.image && (
-                            <div className="flex-shrink-0">
-                              <img
-                                src={article.image}
-                                alt=""
-                                className="h-20 w-20 rounded-lg border border-slate-800 object-cover transition group-hover:border-indigo-500/50"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = "none";
-                                }}
-                              />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-medium text-white line-clamp-2 group-hover:text-indigo-300 transition">
-                              {article.title}
-                            </h4>
-                            {article.summary && (
-                              <p className="mt-2 text-xs text-slate-400 line-clamp-2">
-                                {article.summary}
-                              </p>
-                            )}
-                            <div className="mt-3 flex items-center gap-3">
-                              <span className="rounded bg-slate-800/50 px-2 py-1 text-xs font-medium text-slate-400">
-                                {article.source}
-                              </span>
-                              <span className="text-xs text-slate-600">
-                                {new Date(article.published_at).toLocaleDateString("en-US", {
-                                  month: "short",
-                                  day: "numeric",
-                                })}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </motion.a>
-                    ))}
-                  </div>
-                </motion.div>
-              )
+              <CategorizedNewsList />
             )}
           </AnimatePresence>
         </motion.div>

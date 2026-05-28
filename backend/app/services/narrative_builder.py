@@ -137,10 +137,11 @@ def _narrative_bullish_extended(
     rsi: float | None,
     confidence: float,
 ) -> str:
-    """Narrative for bullish but extended signal"""
+    """Narrative for bullish but extended signal - NUANCED, not overstated"""
     parts = []
 
-    parts.append("The stock remains in a strong upward trend")
+    # More nuanced: "remains in" vs "strong upward trend"
+    parts.append("The broader trend structure remains favorable")
 
     # Momentum quality
     if momentum == "bullish":

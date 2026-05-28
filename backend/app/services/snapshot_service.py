@@ -6,9 +6,11 @@ from datetime import date, datetime, timedelta
 from loguru import logger
 
 from app.db.init_db import get_connection
+from app.services.data_validator import validate_snapshot_data
 from app.services.news_aggregator_service import get_news_aggregator
 from app.services.stock_service import build_market_row
 from app.utils.stock_universe import SECTOR_TICKERS
+from app.utils.ticker_names import get_company_name
 
 # In-memory cache for snapshot
 _snapshot_cache = {
@@ -28,11 +30,25 @@ async def generate_daily_snapshot() -> dict:
     try:
         rows = []
         for t in tickers:
-            rows.append(await build_market_row(db, t))
+            row = await build_market_row(db, t)
+            # Add company name to each row
+            row["company_name"] = get_company_name(t)
+            rows.append(row)
+        
+        # Include all rows with valid returns (don't filter by error - let validation happen later)
         valid = [r for r in rows if isinstance(r.get("ytd_return_pct"), (int, float))]
-        gainers = sorted(valid, key=lambda x: x.get("ytd_return_pct", 0), reverse=True)[:5]
-        losers = sorted(valid, key=lambda x: x.get("ytd_return_pct", 0))[:5]
-        picks = gainers[:3]
+        
+        if not valid:
+            logger.warning(f"No valid rows after filtering. Total rows: {len(rows)}")
+            for r in rows:
+                if "error" in r:
+                    logger.warning(f"  {r.get('ticker')}: {r.get('error')}")
+        
+        gainers = sorted(valid, key=lambda x: x.get("ytd_return_pct", 0), reverse=True)[:10]
+        losers = sorted(valid, key=lambda x: x.get("ytd_return_pct", 0))[:10]
+        picks = gainers[:5]
+        
+        logger.info(f"Snapshot: {len(valid)} valid rows, {len(picks)} picks, {len(gainers)} gainers, {len(losers)} losers")
         
         # Get news for top gainers
         top_news = {}
@@ -42,6 +58,13 @@ async def generate_daily_snapshot() -> dict:
         
         # Get general market news
         market_news = await news_agg.get_market_news(limit=5)
+        
+        # Replace NaN values with 0 for JSON serialization
+        import math
+        for row_list in [picks, gainers, losers, valid]:
+            for row in row_list:
+                if isinstance(row.get("ytd_return_pct"), float) and math.isnan(row.get("ytd_return_pct")):
+                    row["ytd_return_pct"] = 0.0
         
         metrics = {
             "universe_count": len(valid),
@@ -56,6 +79,11 @@ async def generate_daily_snapshot() -> dict:
             "top_news": top_news,
             "market_news": market_news,
         }
+        
+        # Validate entire snapshot
+        payload, validation_errors = validate_snapshot_data(payload)
+        if validation_errors:
+            logger.warning(f"Snapshot validation issues: {validation_errors}")
         
         # Update cache
         _snapshot_cache["data"] = payload

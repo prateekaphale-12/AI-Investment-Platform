@@ -64,18 +64,25 @@ export function MarketSnapshot({
           <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
             🚀 Top Picks
           </p>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {picks.map((p) => (
-              <div key={p.ticker} className="flex items-center justify-between text-sm">
-                <span className="font-semibold text-white">{p.ticker}</span>
-                <span
-                  className={`font-medium ${
-                    (p.ytd_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
-                  }`}
-                >
-                  {(p.ytd_return_pct ?? 0) > 0 ? "+" : ""}
-                  {(p.ytd_return_pct ?? 0).toFixed(1)}%
-                </span>
+              <div key={p.ticker} className="rounded-lg bg-slate-800/30 p-2.5 border border-slate-700/50">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold text-white text-sm">{p.ticker}</span>
+                  <span
+                    className={`font-medium text-xs ${
+                      (p.ytd_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"
+                    }`}
+                  >
+                    {(p.ytd_return_pct ?? 0) > 0 ? "+" : ""}
+                    {(p.ytd_return_pct ?? 0).toFixed(1)}%
+                  </span>
+                </div>
+                {p.current_price && (
+                  <p className="text-xs text-slate-400">
+                    Price: ${p.current_price.toFixed(2)}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -87,10 +94,15 @@ export function MarketSnapshot({
             📈 Top Gainers
           </p>
           <div className="space-y-2">
-            {gainers.slice(0, 4).map((g) => (
-              <div key={g.ticker} className="flex items-center justify-between text-sm">
-                <span className="text-slate-300">{g.ticker}</span>
-                <span className="font-medium text-emerald-400">+{(g.ytd_return_pct ?? 0).toFixed(1)}%</span>
+            {gainers.slice(0, 5).map((g) => (
+              <div key={g.ticker} className="rounded-lg bg-slate-800/30 p-2 border border-slate-700/50">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-slate-300 text-sm font-medium">{g.ticker}</span>
+                  <span className="font-medium text-emerald-400 text-xs">+{(g.ytd_return_pct ?? 0).toFixed(1)}%</span>
+                </div>
+                {g.current_price && (
+                  <p className="text-xs text-slate-500">${g.current_price.toFixed(2)}</p>
+                )}
               </div>
             ))}
           </div>
@@ -102,10 +114,15 @@ export function MarketSnapshot({
             📉 Top Losers
           </p>
           <div className="space-y-2">
-            {losers.slice(0, 4).map((l) => (
-              <div key={l.ticker} className="flex items-center justify-between text-sm">
-                <span className="text-slate-300">{l.ticker}</span>
-                <span className="font-medium text-red-400">{(l.ytd_return_pct ?? 0).toFixed(1)}%</span>
+            {losers.slice(0, 5).map((l) => (
+              <div key={l.ticker} className="rounded-lg bg-slate-800/30 p-2 border border-slate-700/50">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-slate-300 text-sm font-medium">{l.ticker}</span>
+                  <span className="font-medium text-red-400 text-xs">{(l.ytd_return_pct ?? 0).toFixed(1)}%</span>
+                </div>
+                {l.current_price && (
+                  <p className="text-xs text-slate-500">${l.current_price.toFixed(2)}</p>
+                )}
               </div>
             ))}
           </div>

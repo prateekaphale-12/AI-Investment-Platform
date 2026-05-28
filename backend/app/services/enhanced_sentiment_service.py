@@ -102,7 +102,7 @@ def _calculate_recency_weight(published_at: str) -> float:
         return 0.7  # Default if parsing fails
 
 
-async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
+async def analyze_headline_sentiment_enhanced(ticker: str, llm_settings: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Enhanced sentiment analysis with event detection and weighting.
 
@@ -116,6 +116,25 @@ async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
         "weighted_sentiment": float (-1 to 1),
         "recent_events": [str],
         "sentiment_interpretation": str,
+        "news_summary": str,
+        "key_headlines": [
+            {
+                "headline": str,
+                "source": str,
+                "url": str,
+                "sentiment": str,
+                "published_at": str
+            }
+        ],
+        "event_analysis": {
+            "total_events": int,
+            "positive_events": int,
+            "negative_events": int,
+            "primary_catalyst": str,
+            "risk_events": [str],
+            "opportunity_events": [str],
+            "event_driven_return": float,
+        }
     }
     """
     try:
@@ -132,6 +151,8 @@ async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
                 "weighted_sentiment": 0.0,
                 "recent_events": [],
                 "sentiment_interpretation": "No recent headlines available.",
+                "news_summary": "Insufficient data for sentiment analysis.",
+                "key_headlines": [],
             }
 
         # Analyze each headline
@@ -139,16 +160,26 @@ async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
         event_types = set()
         recent_events = []
         weighted_scores = []
+        headline_details = []
 
         for article in news:
             headline = article.get("title", "")
             source = article.get("source", "Unknown")
             published_at = article.get("published_at", "")
+            url = article.get("url", "")
 
             # Get sentiment
             vader_scores = _analyzer.polarity_scores(headline)
             compound = vader_scores["compound"]
             sentiments.append(compound)
+
+            # Determine sentiment label for this headline
+            if compound >= 0.15:
+                headline_sentiment = "positive"
+            elif compound <= -0.15:
+                headline_sentiment = "negative"
+            else:
+                headline_sentiment = "neutral"
 
             # Detect event type
             event = _detect_event_type(headline)
@@ -161,6 +192,16 @@ async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
             recency_weight = _calculate_recency_weight(published_at)
             weighted_score = compound * source_weight * recency_weight
             weighted_scores.append(weighted_score)
+
+            # Store headline details for output
+            headline_details.append({
+                "headline": headline,
+                "source": source,
+                "url": url,
+                "sentiment": headline_sentiment,
+                "published_at": published_at,
+                "compound": compound,
+            })
 
         # Calculate aggregate metrics
         avg_sentiment = sum(sentiments) / len(sentiments) if sentiments else 0.0
@@ -188,6 +229,24 @@ async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
             len(sentiments),
         )
 
+        # Generate news summary (AI-synthesized from all headlines)
+        news_summary = await _generate_ai_news_summary(
+            ticker,
+            headline_details,
+            llm_settings,
+        )
+
+        # Get top 3 headlines (sorted by recency and sentiment strength)
+        key_headlines = sorted(
+            headline_details,
+            key=lambda x: (abs(x["compound"]), x["published_at"]),
+            reverse=True
+        )[:3]
+
+        # Perform event-aware sentiment analysis
+        from app.services.event_sentiment_agent import EventSentimentAgent
+        event_analysis = EventSentimentAgent.analyze_events(ticker, headline_details)
+
         return {
             "compound": round(avg_sentiment, 4),
             "label": label,
@@ -195,8 +254,11 @@ async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
             "event_types": sorted(list(event_types)),
             "sentiment_consistency": round(consistency, 2),
             "weighted_sentiment": round(weighted_sentiment, 4),
-            "recent_events": recent_events[:3],  # Top 3 recent events
+            "recent_events": recent_events[:3],
             "sentiment_interpretation": interpretation,
+            "news_summary": news_summary,
+            "key_headlines": key_headlines,
+            "event_analysis": event_analysis.get("event_summary", {}),
         }
     except Exception as e:
         from loguru import logger
@@ -211,14 +273,109 @@ async def analyze_headline_sentiment_enhanced(ticker: str) -> dict[str, Any]:
             "weighted_sentiment": 0.0,
             "recent_events": [],
             "sentiment_interpretation": f"Sentiment analysis error: {str(e)[:100]}",
+            "news_summary": "Error analyzing sentiment.",
+            "key_headlines": [],
+            "event_analysis": {
+                "total_events": 0,
+                "positive_events": 0,
+                "negative_events": 0,
+                "net_event_impact": 0.0,
+                "primary_catalyst": None,
+                "risk_events": [],
+                "opportunity_events": [],
+            },
         }
+
+
+async def _generate_ai_news_summary(
+    ticker: str,
+    headline_details: list[dict[str, Any]],
+    llm_settings: dict[str, Any] | None = None,
+) -> str:
+    """
+    Generate AI-synthesized summary of all headlines.
+    
+    Summarizes the key themes, events, and sentiment drivers from all headlines.
+    """
+    if not headline_details:
+        return "No headlines available for summary."
+    
+    try:
+        # Prepare headlines for summarization
+        headlines_text = "\n".join([
+            f"- {h['headline']} ({h['source']})"
+            for h in headline_details
+        ])
+        
+        # Create summarization prompt
+        prompt = f"""Analyze these {len(headline_details)} recent headlines about {ticker} and provide a concise 2-3 sentence summary of the key themes, events, and market sentiment drivers.
+
+Headlines:
+{headlines_text}
+
+Summary (2-3 sentences, focus on key themes and sentiment drivers):"""
+        
+        # Use LLM to generate summary
+        from app.services.llm_service import generate_with_provider, LLMProvider
+        
+        # Get LLM settings from parameter or use defaults
+        if not llm_settings or not llm_settings.get("provider"):
+            return _fallback_summary(headline_details)
+        
+        provider = LLMProvider(llm_settings["provider"])
+        api_key = llm_settings.get("api_key")
+        
+        summary = await generate_with_provider(
+            provider=provider,
+            prompt=prompt,
+            api_key=api_key,
+            temperature=0.4,
+            max_tokens=150
+        )
+        return summary.strip() if summary else _fallback_summary(headline_details)
+    
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"AI summary generation failed for {ticker}: {e}")
+        return _fallback_summary(headline_details)
+
+
+def _fallback_summary(headline_details: list[dict[str, Any]]) -> str:
+    """Fallback summary if AI generation fails"""
+    if not headline_details:
+        return "No headlines available."
+    
+    # Extract key themes from headlines
+    themes = set()
+    for h in headline_details:
+        headline_lower = h["headline"].lower()
+        if "earnings" in headline_lower:
+            themes.add("earnings")
+        if "analyst" in headline_lower or "upgrade" in headline_lower or "downgrade" in headline_lower:
+            themes.add("analyst activity")
+        if "acquisition" in headline_lower or "merger" in headline_lower:
+            themes.add("M&A activity")
+        if "product" in headline_lower or "launch" in headline_lower:
+            themes.add("product news")
+        if "regulatory" in headline_lower or "sec" in headline_lower:
+            themes.add("regulatory matters")
+    
+    # Count sentiment
+    positive = sum(1 for h in headline_details if h["sentiment"] == "positive")
+    negative = sum(1 for h in headline_details if h["sentiment"] == "negative")
+    
+    # Build fallback summary
+    theme_str = ", ".join(sorted(themes)) if themes else "mixed developments"
+    sentiment_str = "positive" if positive > negative else "negative" if negative > positive else "mixed"
+    
+    return f"Recent news shows {sentiment_str} sentiment with focus on {theme_str}. Based on {len(headline_details)} headlines from multiple sources."
 
 
 def _interpret_sentiment(
     label: str,
     consistency: float,
     event_types: list[str],
-    headline_count: int,
+    headlines_count: int,
 ) -> str:
     """Generate human-readable sentiment interpretation"""
     parts = []
@@ -245,10 +402,10 @@ def _interpret_sentiment(
         parts.append(f"Recent events: {event_str}")
 
     # Data quality
-    if headline_count >= 5:
-        parts.append(f"({headline_count} sources)")
-    elif headline_count > 0:
-        parts.append(f"({headline_count} source(s), limited data)")
+    if headlines_count >= 5:
+        parts.append(f"({headlines_count} sources)")
+    elif headlines_count > 0:
+        parts.append(f"({headlines_count} source(s), limited data)")
 
     return "; ".join(parts)
 
@@ -256,6 +413,7 @@ def _interpret_sentiment(
 async def get_sentiment_with_macro_context(
     ticker: str,
     macro_context: dict[str, Any] | None = None,
+    llm_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Get sentiment analysis with macro context adjustment.
@@ -263,7 +421,7 @@ async def get_sentiment_with_macro_context(
     In risk-off environments, negative sentiment is amplified.
     In risk-on environments, positive sentiment is amplified.
     """
-    sentiment = await analyze_headline_sentiment_enhanced(ticker)
+    sentiment = await analyze_headline_sentiment_enhanced(ticker, llm_settings)
 
     if not macro_context:
         return sentiment

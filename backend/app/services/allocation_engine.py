@@ -22,34 +22,51 @@ from loguru import logger
 Risk = Literal["low", "medium", "high"]
 
 
-def _risk_score_from(beta: float | None, signal: str, confidence: float = 0.5) -> float:
+def _risk_score_from(beta: float | None, signal: str, confidence: float = 0.5, ytd_return: float = 0.0) -> float:
     """
-    Calculate risk score (0-100) based on beta, signal, and confidence.
+    Calculate RISK score (0-100) based on VOLATILITY, not momentum.
     
-    Higher score = higher risk.
+    CRITICAL: Risk ≠ Opportunity
+    - High-growth stocks (NVDA, MU) = HIGH RISK (high volatility)
+    - Stable stocks (MSFT, AAPL) = MODERATE RISK (lower volatility)
+    - Signal (bullish/bearish) does NOT reduce risk
+    
+    Risk factors:
+    1. Beta (systematic volatility) - PRIMARY FACTOR
+    2. YTD return magnitude (high returns = high volatility) - SECONDARY
+    3. Confidence (low confidence = higher uncertainty risk)
+    
+    Signal does NOT affect risk score (bullish doesn't mean less risky).
     """
     base = 40.0
     
-    # Beta component (systematic risk)
+    # PRIMARY: Beta component (systematic risk/volatility)
+    # This is the main driver of risk
     if beta is not None and isinstance(beta, (int, float)):
         beta_float = float(beta)
-        base = min(100.0, max(10.0, 30.0 + beta_float * 25.0))
+        # Beta 0.8 = 40, Beta 1.0 = 50, Beta 1.5 = 67.5, Beta 2.0 = 85
+        base = min(95.0, max(15.0, 30.0 + beta_float * 35.0))
     
-    # Signal component
-    if signal == "bullish":
-        base -= 5
-    elif signal == "bearish":
-        base += 10
-    elif signal == "bullish_but_extended":
-        base += 5  # Overbought = higher risk
-    elif signal == "bearish_but_oversold":
-        base -= 5  # Oversold = lower risk (bounce potential)
+    # SECONDARY: YTD return magnitude (high returns often = high volatility)
+    # Stocks with extreme returns are riskier
+    abs_return = abs(ytd_return)
+    if abs_return > 100:
+        base += 20  # Extreme returns = high risk
+    elif abs_return > 50:
+        base += 12  # Very high returns = elevated risk
+    elif abs_return > 30:
+        base += 6   # High returns = some additional risk
     
-    # Confidence component (low confidence = higher risk)
-    if confidence < 0.5:
-        base += (0.5 - confidence) * 20  # Up to +10 risk points
-    elif confidence > 0.7:
-        base -= (confidence - 0.7) * 10  # Up to -3 risk points
+    # Confidence component (low confidence = higher uncertainty risk)
+    # This is a MODIFIER, not primary
+    if confidence < 0.45:
+        base += 8   # Low confidence = higher risk
+    elif confidence > 0.75:
+        base -= 3   # High confidence = slightly lower risk
+    
+    # IMPORTANT: Signal does NOT affect risk
+    # Bullish signal doesn't make a volatile stock less risky
+    # Bearish signal doesn't make a stable stock more risky
     
     return round(max(10.0, min(100.0, base)), 1)
 
@@ -58,37 +75,61 @@ def _expected_return_heuristic(
     ytd_return_pct: float,
     signal: str,
     confidence: float = 0.5,
+    beta: float | None = None,
 ) -> float:
     """
-    Calculate expected return heuristic (not a forecast).
+    Calculate expected return heuristic (NOT a rigorous forecast).
     
-    Based on:
-    - Trailing momentum (35% weight)
-    - Signal direction (bullish/bearish)
-    - Confidence (higher confidence = higher expected return)
+    CRITICAL NOTES:
+    - This is a HEURISTIC ESTIMATE, not a financial forecast
+    - Should be displayed with caveats about uncertainty
+    - Range: -10% to +15% (conservative)
+    - Accounts for mean reversion (high past returns don't predict future)
+    
+    Methodology:
+    1. Base: 20% of YTD return (mean reversion adjustment)
+    2. Signal adjustment: ±1-2%
+    3. Confidence adjustment: ±1%
+    4. Beta adjustment: High volatility = lower expected return (risk premium)
+    
+    This is MUCH more conservative than the old 35% of YTD return.
     """
-    # Base: 35% of YTD return
-    raw = ytd_return_pct * 0.35
+    # BASE: Only 20% of YTD return (mean reversion)
+    # High past returns don't predict high future returns
+    raw = ytd_return_pct * 0.20
     
-    # Signal boost
+    # Signal adjustment (modest impact)
     if signal == "bullish":
-        raw += 2.0
-    elif signal == "bearish":
-        raw -= 2.0
-    elif signal == "bullish_but_extended":
-        raw += 1.0  # Less bullish due to extension
-    elif signal == "bearish_but_oversold":
-        raw -= 1.0  # Less bearish due to oversold
-    
-    # Confidence boost (higher confidence = higher expected return)
-    if confidence >= 0.7:
         raw += 1.5
-    elif confidence >= 0.55:
+    elif signal == "bearish":
+        raw -= 1.5
+    elif signal == "bullish_but_extended":
+        raw += 0.5  # Less bullish due to extension
+    elif signal == "bearish_but_oversold":
+        raw -= 0.5  # Less bearish due to oversold
+    
+    # Confidence adjustment (modest impact)
+    if confidence >= 0.75:
+        raw += 1.0
+    elif confidence >= 0.60:
         raw += 0.5
     elif confidence < 0.45:
         raw -= 1.0
     
-    return round(max(-15.0, min(25.0, raw)), 2)
+    # Beta adjustment (high volatility = lower expected return)
+    # This accounts for risk premium
+    if beta is not None and isinstance(beta, (int, float)):
+        beta_float = float(beta)
+        if beta_float > 1.5:
+            raw -= 2.0  # High beta = lower expected return
+        elif beta_float > 1.2:
+            raw -= 1.0
+        elif beta_float < 0.8:
+            raw += 0.5  # Low beta = slight premium
+    
+    # Clamp to realistic range: -10% to +15%
+    # This prevents unrealistic expectations
+    return round(max(-10.0, min(15.0, raw)), 2)
 
 
 def _calculate_confidence_weight(
@@ -244,7 +285,8 @@ def calculate_confidence_driven_weights(
         risk_score = _risk_score_from(
             beta if isinstance(beta, (int, float)) else None,
             signal,
-            confidence
+            confidence,
+            ytd if isinstance(ytd, (int, float)) else 0.0
         )
         if risk_score > 75:
             w *= 0.85  # High risk = reduce weight
@@ -313,13 +355,19 @@ def build_allocations_confidence_driven(
         final_confidence = confidence_data.get("final_confidence", 0.5)
         
         # Calculate metrics
-        er = _expected_return_heuristic(ytd, signal, final_confidence)
+        er = _expected_return_heuristic(
+            ytd, 
+            signal, 
+            final_confidence,
+            beta if isinstance(beta, (int, float)) else None
+        )
         exp_returns.append(er * (w / 100.0))
         
         risk_score = _risk_score_from(
             beta if isinstance(beta, (int, float)) else None,
             signal,
-            final_confidence
+            final_confidence,
+            ytd
         )
         
         rationale = row.get("rationale", {})

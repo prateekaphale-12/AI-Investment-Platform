@@ -84,9 +84,13 @@ export async function deleteWatchlistItem(id: string) {
 }
 
 export async function getCapabilities() {
-  const { data } = await api.get<{ gemini_configured: boolean; gemini_model: string }>(
-    "/api/v1/capabilities",
-  );
+  const { data } = await api.get<{
+    ai_configured: boolean;
+    openai_configured: boolean;
+    openai_model: string;
+    groq_configured: boolean;
+    groq_model: string;
+  }>("/api/v1/capabilities");
   return data;
 }
 
@@ -136,6 +140,62 @@ export async function getDailySnapshot() {
       image?: string;
     }>;
   }>("/api/v1/market/daily-snapshot");
+  return data;
+}
+
+export async function getStocks(category: "picks" | "gainers" | "losers" = "gainers", offset: number = 0, limit: number = 10) {
+  const { data } = await api.get<{
+    category: string;
+    offset: number;
+    limit: number;
+    total: number;
+    items: Array<{ ticker: string; current_price?: number; ytd_return_pct: number; company_name?: string }>;
+  }>("/api/v1/market/stocks", { params: { category, offset, limit } });
+  return data;
+}
+
+export async function getNews(category: string = "general", page: number = 1) {
+  const { data } = await api.get<{
+    category: string;
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+    items: Array<{
+      title: string;
+      url: string;
+      source: string;
+      published_at: string;
+      summary?: string;
+      image?: string;
+      category?: string;
+      sentiment?: string;
+      sentiment_score?: number;
+      dedupe_hash?: string;
+    }>;
+    cached: boolean;
+    freshness?: {
+      age_seconds: number;
+      ttl_remaining: number;
+      cached_at: string;
+    };
+  }>("/api/v1/market/news", { params: { category, page } });
+  return data;
+}
+
+export async function getTickerNews(ticker: string) {
+  const { data } = await api.get<{
+    ticker: string;
+    items: Array<{
+      title: string;
+      url: string;
+      source: string;
+      published_at: string;
+      summary?: string;
+      image?: string;
+      sentiment?: string;
+    }>;
+  }>(`/api/v1/stocks/${ticker}/news`);
   return data;
 }
 

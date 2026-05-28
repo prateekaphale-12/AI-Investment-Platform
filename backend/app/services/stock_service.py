@@ -15,38 +15,45 @@ CACHE_TTL = timedelta(hours=1)
 
 
 async def _cache_get(db: Any, ticker: str, data_type: str) -> dict[str, Any] | None:
-    cur = await db.execute(
-        "SELECT data, fetched_at FROM stock_cache WHERE ticker = ? AND data_type = ?",
-        (ticker.upper(), data_type),
-    )
-    row = await cur.fetchone()
-    if not row:
+    try:
+        cur = await db.execute(
+            "SELECT data, fetched_at FROM stock_cache WHERE ticker = ? AND data_type = ?",
+            (ticker.upper(), data_type),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        
+        # row["fetched_at"] is a naive datetime from DB (no timezone info)
+        fetched = row["fetched_at"]
+        
+        # Compare naive datetimes to avoid timezone mismatch errors
+        if datetime.now(UTC).replace(tzinfo=None) - fetched > CACHE_TTL:
+            return None
+        return json.loads(row["data"])
+    except Exception as e:
+        logger.warning(f"Cache get failed for {ticker}: {e}")
         return None
-    
-    # row["fetched_at"] is a naive datetime from DB (no timezone info)
-    fetched = row["fetched_at"]
-    
-    # Compare naive datetimes to avoid timezone mismatch errors
-    if datetime.now(UTC).replace(tzinfo=None) - fetched > CACHE_TTL:
-        return None
-    return json.loads(row["data"])
 
 
 async def _cache_set(db: Any, ticker: str, data_type: str, data: dict[str, Any]) -> None:
-    # Use naive UTC datetime for PostgreSQL (remove tzinfo before storing)
-    # This ensures consistency with what comes back from the DB
-    now = datetime.now(UTC).replace(tzinfo=None)
-    
-    await db.execute(
-        """
-        INSERT INTO stock_cache (ticker, data_type, data, fetched_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(ticker, data_type) DO UPDATE SET
-            data = excluded.data,
-            fetched_at = excluded.fetched_at
-        """,
-        (ticker.upper(), data_type, json.dumps(data), now),
-    )
+    try:
+        # Use naive UTC datetime for PostgreSQL (remove tzinfo before storing)
+        # This ensures consistency with what comes back from the DB
+        now = datetime.now(UTC).replace(tzinfo=None)
+        
+        await db.execute(
+            """
+            INSERT INTO stock_cache (ticker, data_type, data, fetched_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(ticker, data_type) DO UPDATE SET
+                data = excluded.data,
+                fetched_at = excluded.fetched_at
+            """,
+            (ticker.upper(), data_type, json.dumps(data), now),
+        )
+    except Exception as e:
+        logger.warning(f"Cache set failed for {ticker}: {e}")
 
 
 def _yf_history_sync(ticker: str, period: str = "1y") -> pd.DataFrame:

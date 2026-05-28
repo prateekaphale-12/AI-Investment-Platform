@@ -18,6 +18,7 @@ from app.api.router import api_router
 from app.config import settings
 from app.db.init_db import init_db
 from app.services.snapshot_service import generate_daily_snapshot
+from app.services.news_ingestion_service import get_ingestion_worker
 from app.utils.logger import setup_logging
 from loguru import logger
 
@@ -32,6 +33,26 @@ async def _warm_daily_snapshot_background() -> None:
         await generate_daily_snapshot()
     except Exception as e:
         logger.warning("Daily snapshot warmup failed (will retry on schedule): {}", e)
+
+
+async def _ingest_news_general() -> None:
+    """Background task: Ingest general news (10 min interval)"""
+    try:
+        worker = get_ingestion_worker()
+        result = await worker.run_ingestion_cycle("general")
+        logger.info(f"General news ingestion completed: {result}")
+    except Exception as e:
+        logger.error(f"General news ingestion failed: {e}")
+
+
+async def _ingest_news_category(category: str) -> None:
+    """Background task: Ingest category-specific news (15 min interval)"""
+    try:
+        worker = get_ingestion_worker()
+        result = await worker.run_ingestion_cycle(category)
+        logger.info(f"{category} news ingestion completed: {result}")
+    except Exception as e:
+        logger.error(f"{category} news ingestion failed: {e}")
 
 
 @asynccontextmanager
@@ -51,12 +72,66 @@ async def lifespan(_: FastAPI):
                 id="snapshot-refresh",
                 replace_existing=True,
             )
+            
+            # News ingestion tasks
+            # General news: every 10 minutes (homepage feed)
+            scheduler.add_job(
+                _ingest_news_general,
+                "interval",
+                minutes=10,
+                id="news-general-ingest",
+                replace_existing=True,
+            )
+            
+            # Category-specific news: every 15 minutes
+            categories = ["finance", "it", "healthcare", "energy", "real_estate"]
+            for category in categories:
+                scheduler.add_job(
+                    _ingest_news_category,
+                    "interval",
+                    minutes=15,
+                    args=[category],
+                    id=f"news-{category}-ingest",
+                    replace_existing=True,
+                )
+            
             scheduler.start()
+            logger.info("APScheduler started with news ingestion tasks")
+        
         # Warm up cache on startup (non-blocking)
         asyncio.create_task(_warm_daily_snapshot_background())
+        
+        # Warm up news cache on startup (non-blocking)
+        async def _warm_news_cache():
+            try:
+                worker = get_ingestion_worker()
+                # Ingest general news immediately
+                await worker.run_ingestion_cycle("general")
+                logger.info("News cache warmed up on startup")
+            except Exception as e:
+                logger.warning(f"News cache warmup failed (will retry on schedule): {e}")
+        
+        asyncio.create_task(_warm_news_cache())
+        
+        # Start real-time services (non-blocking)
+        try:
+            from app.services.realtime.launcher import start_realtime_services
+            asyncio.create_task(start_realtime_services())
+            logger.info("Real-time services started")
+        except Exception as e:
+            logger.warning(f"Real-time services not started: {e}")
+    
     yield
+    
     if scheduler.running:
         scheduler.shutdown(wait=False)
+    
+    # Stop real-time services
+    try:
+        from app.services.realtime.launcher import stop_realtime_services
+        await stop_realtime_services()
+    except:
+        pass
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

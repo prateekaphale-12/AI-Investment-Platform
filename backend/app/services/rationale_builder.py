@@ -16,7 +16,9 @@ def describe_market_trend(market: dict[str, Any]) -> str:
     if ytd is None:
         return "Insufficient price history for trend summary."
     direction = "up" if ytd >= 0 else "down"
-    return f"Trailing period return ~{ytd}% ({direction}); last price {price}."
+    # Format price to 2 decimal places
+    formatted_price = f"{price:.2f}" if price is not None else "N/A"
+    return f"Trailing period return ~{ytd}% ({direction}); last price {formatted_price}."
 
 
 def describe_technical(tech: dict[str, Any]) -> str:
@@ -30,11 +32,46 @@ def describe_technical(tech: dict[str, Any]) -> str:
 
 def describe_sentiment(sent: dict[str, Any]) -> str:
     """
-    Provide institutional-grade sentiment narrative.
+    Provide institutional-grade sentiment narrative with AI-synthesized news summary.
     
-    Uses narrative_builder to convert sentiment data into premium language.
+    Format:
+    Sentiment: [Label]
+    
+    Summary based on news:
+    [AI-synthesized summary of all headlines]
+    
+    Key Headlines:
+    - [Headline 1] (Source) ↗
+    - [Headline 2] (Source) ↗
+    - [Headline 3] (Source) ↗
     """
-    return build_sentiment_narrative(sent)
+    label = sent.get("label", "neutral").capitalize()
+    news_summary = sent.get("news_summary", "")
+    key_headlines = sent.get("key_headlines", [])
+    
+    parts = [f"Sentiment: {label}\n"]
+    
+    if news_summary:
+        parts.append(f"Summary based on news:\n{news_summary}\n")
+    
+    if key_headlines:
+        parts.append("Key Headlines:")
+        for headline in key_headlines:
+            title = headline.get("headline", "")
+            source = headline.get("source", "Unknown")
+            url = headline.get("url", "")
+            
+            # Truncate long headlines
+            if len(title) > 80:
+                title = title[:77] + "..."
+            
+            if url:
+                parts.append(f"  • {title}")
+                parts.append(f"    Source: {source} | {url}")
+            else:
+                parts.append(f"  • {title} ({source})")
+    
+    return "\n".join(parts)
 
 
 def describe_fundamentals(info: dict[str, Any]) -> str:
