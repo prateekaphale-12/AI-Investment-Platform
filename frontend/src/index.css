@@ -5,3 +5,34 @@
 :root {
   color-scheme: dark;
 }
+
+/* Custom Scrollbar Styling */
+@layer components {
+  /* Webkit browsers (Chrome, Safari, Edge) */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-900/50;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-700 rounded-full transition-colors duration-200;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-600;
+  }
+
+  /* Firefox */
+  * {
+    scrollbar-color: rgb(55, 65, 81) rgb(15, 23, 42);
+    scrollbar-width: thin;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+}

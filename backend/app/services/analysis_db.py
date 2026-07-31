@@ -4,8 +4,6 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-import aiosqlite
-
 AGENT_ORDER = [
     "planner",
     "market_research",
@@ -19,7 +17,7 @@ AGENT_ORDER = [
 
 
 async def insert_session(
-    db: aiosqlite.Connection,
+    db: Any,
     session_id: str,
     user_input: dict[str, Any],
     user_id: str | None = None,
@@ -44,7 +42,7 @@ async def insert_session(
 
 
 async def set_agent_status(
-    db: aiosqlite.Connection,
+    db: Any,
     session_id: str,
     agent_name: str,
     status: str,
@@ -61,7 +59,7 @@ async def set_agent_status(
 
 
 async def finalize_session(
-    db: aiosqlite.Connection,
+    db: Any,
     session_id: str,
     *,
     status: str,
@@ -72,6 +70,9 @@ async def finalize_session(
     report: str = "",
     report_id: str = "",
 ) -> None:
+    # Use naive UTC datetime for PostgreSQL (remove tzinfo)
+    completed_at = datetime.now(UTC).replace(tzinfo=None)
+    
     await db.execute(
         """
         UPDATE analysis_sessions
@@ -87,24 +88,27 @@ async def finalize_session(
             json.dumps(portfolio) if portfolio is not None else None,
             report,
             report_id,
-            datetime.now(UTC).replace(tzinfo=None).isoformat(),
+            completed_at,
             session_id,
         ),
     )
     await db.commit()
 
 
-async def load_session_row(db: aiosqlite.Connection, session_id: str) -> aiosqlite.Row | None:
+async def load_session_row(db: Any, session_id: str) -> dict[str, Any] | None:
     cur = await db.execute(
         """SELECT id, user_id, user_input, status, summary, market_data, technical_data, portfolio,
                   report, report_id, completed_at FROM analysis_sessions WHERE id = ?""",
         (session_id,),
     )
     row = await cur.fetchone()
-    return row
+    if not row:
+        return None
+    # Convert asyncpg Record to dict if needed
+    return dict(row) if hasattr(row, 'keys') else row
 
 
-async def load_user_sessions(db: aiosqlite.Connection, user_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+async def load_user_sessions(db: Any, user_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
     cur = await db.execute(
         """
         SELECT id, status, summary, created_at, completed_at
@@ -130,7 +134,7 @@ async def load_user_sessions(db: aiosqlite.Connection, user_id: str, limit: int 
     return out
 
 
-async def load_agent_progress(db: aiosqlite.Connection, session_id: str) -> list[dict[str, Any]]:
+async def load_agent_progress(db: Any, session_id: str) -> list[dict[str, Any]]:
     cur = await db.execute(
         """
         SELECT agent_name, status, error FROM agent_progress

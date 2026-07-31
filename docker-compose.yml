@@ -16,6 +16,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning --appendonly yes
 
   backend:
     build: ./backend
@@ -25,6 +26,9 @@ services:
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
       DATABASE_URL: postgresql://ai_app:Cr7m10p7!!@postgres:5432/ai_investment
       REDIS_URL: redis://redis:6379/0
+      ALPHA_VANTAGE_KEY: J0RMGODDUVCQ5FG2
+      NEWSAPI_KEY: 29c2a80f3a02489d89f671b696499016
+      FINNHUB_KEY: "d82nf61r01qmgc0gqe10d82nf61r01qmgc0gqe1g"
     volumes:
       - backend_data:/app/data
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000

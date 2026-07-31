@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
-from app.config import settings
-from app.main import app
+# Client fixture is now provided by conftest.py
 
 
 def _auth_headers(client: TestClient) -> dict[str, str]:
@@ -18,9 +15,7 @@ def _auth_headers(client: TestClient) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_analysis_endpoints_happy_path(tmp_path: Path, monkeypatch) -> None:
-    db_path = tmp_path / "test_app.db"
-    monkeypatch.setattr(settings, "database_path", db_path)
+def test_analysis_endpoints_happy_path(client: TestClient, monkeypatch) -> None:
 
     async def _fake_execute_analysis(session_id: str) -> None:
         from app.db.init_db import get_connection
@@ -72,34 +67,31 @@ def test_analysis_endpoints_happy_path(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(analysis_endpoint, "execute_analysis", _fake_execute_analysis)
 
-    with TestClient(app) as client:
-        headers = _auth_headers(client)
-        payload = {
-            "budget": 50000,
-            "risk_tolerance": "medium",
-            "investment_horizon": "1y",
-            "interests": ["Technology"],
-            "goal": "growth",
-        }
-        create = client.post("/api/v1/analyze", json=payload, headers=headers)
-        assert create.status_code == 202
-        session_id = create.json()["session_id"]
+    headers = _auth_headers(client)
+    payload = {
+        "budget": 50000,
+        "risk_tolerance": "medium",
+        "investment_horizon": "1y",
+        "interests": ["Technology"],
+        "goal": "growth",
+    }
+    create = client.post("/api/v1/analyze", json=payload, headers=headers)
+    assert create.status_code == 202
+    session_id = create.json()["session_id"]
 
-        status = client.get(f"/api/v1/analysis/{session_id}/status", headers=headers)
-        assert status.status_code == 200
-        assert status.json()["status"] == "completed"
+    status = client.get(f"/api/v1/analysis/{session_id}/status", headers=headers)
+    assert status.status_code == 200
+    assert status.json()["status"] == "completed"
 
-        results = client.get(f"/api/v1/analysis/{session_id}/results", headers=headers)
-        assert results.status_code == 200
-        body = results.json()
-        assert body["status"] == "completed"
-        assert body["summary"]["total_budget"] == 50000
-        assert body["portfolio"]["allocations"][0]["ticker"] == "NVDA"
+    results = client.get(f"/api/v1/analysis/{session_id}/results", headers=headers)
+    assert results.status_code == 200
+    body = results.json()
+    assert body["status"] == "completed"
+    assert body["summary"]["total_budget"] == 50000
+    assert body["portfolio"]["allocations"][0]["ticker"] == "NVDA"
 
 
-def test_analysis_status_not_found(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "database_path", tmp_path / "test_app.db")
-    with TestClient(app) as client:
-        headers = _auth_headers(client)
-        res = client.get("/api/v1/analysis/does-not-exist/status", headers=headers)
-        assert res.status_code == 404
+def test_analysis_status_not_found(client: TestClient) -> None:
+    headers = _auth_headers(client)
+    res = client.get("/api/v1/analysis/does-not-exist/status", headers=headers)
+    assert res.status_code == 404

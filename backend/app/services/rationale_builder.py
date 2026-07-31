@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.narrative_builder import (
+    build_fundamental_narrative,
+    build_risk_narrative,
+    build_sentiment_narrative,
+    build_technical_narrative,
+)
+
 
 def describe_market_trend(market: dict[str, Any]) -> str:
     ytd = market.get("ytd_return_pct")
@@ -9,48 +16,119 @@ def describe_market_trend(market: dict[str, Any]) -> str:
     if ytd is None:
         return "Insufficient price history for trend summary."
     direction = "up" if ytd >= 0 else "down"
-    return f"Trailing period return ~{ytd}% ({direction}); last price {price}."
+    # Format price to 2 decimal places
+    formatted_price = f"{price:.2f}" if price is not None else "N/A"
+    return f"Trailing period return ~{ytd}% ({direction}); last price {formatted_price}."
 
 
 def describe_technical(tech: dict[str, Any]) -> str:
-    rsi = tech.get("rsi")
-    sig = tech.get("signal")
-    macd = tech.get("macd")
-    msig = tech.get("macd_signal")
-    parts = []
-    if rsi is not None:
-        parts.append(f"RSI(14) {round(rsi, 1)}")
-    if macd is not None and msig is not None:
-        parts.append(f"MACD vs signal: {round(macd, 3)} / {round(msig, 3)}")
-    parts.append(f"Signal: {sig or 'neutral'}")
-    return "; ".join(parts) if parts else "No technical metrics available."
+    """
+    Provide institutional-grade technical narrative.
+    
+    Uses narrative_builder to convert internal signals into premium language.
+    """
+    return build_technical_narrative(tech)
 
 
 def describe_sentiment(sent: dict[str, Any]) -> str:
-    lab = sent.get("label")
-    comp = sent.get("compound")
-    n = sent.get("headlines_used", 0)
-    if not n:
-        return "No recent headlines available for sentiment scoring."
-    return f"VADER-style aggregate {comp} ({lab}) from {n} headline(s)."
+    """
+    Provide institutional-grade sentiment narrative with AI-synthesized news summary.
+    
+    Format:
+    Sentiment: [Label]
+    
+    Summary based on news:
+    [AI-synthesized summary of all headlines]
+    
+    Key Headlines:
+    - [Headline 1] (Source) ↗
+    - [Headline 2] (Source) ↗
+    - [Headline 3] (Source) ↗
+    """
+    label = sent.get("label", "neutral").capitalize()
+    news_summary = sent.get("news_summary", "")
+    key_headlines = sent.get("key_headlines", [])
+    
+    parts = [f"Sentiment: {label}\n"]
+    
+    if news_summary:
+        parts.append(f"Summary based on news:\n{news_summary}\n")
+    
+    if key_headlines:
+        parts.append("Key Headlines:")
+        for headline in key_headlines:
+            title = headline.get("headline", "")
+            source = headline.get("source", "Unknown")
+            url = headline.get("url", "")
+            
+            # Truncate long headlines
+            if len(title) > 80:
+                title = title[:77] + "..."
+            
+            if url:
+                parts.append(f"  • {title}")
+                parts.append(f"    Source: {source} | {url}")
+            else:
+                parts.append(f"  • {title} ({source})")
+    
+    return "\n".join(parts)
 
 
 def describe_fundamentals(info: dict[str, Any]) -> str:
-    pe = info.get("trailingPE")
-    rg = info.get("revenueGrowth")
-    pm = info.get("profitMargins")
-    parts = []
-    if pe is not None and isinstance(pe, int | float):
-        parts.append(f"Trailing P/E ~{round(float(pe), 1)}")
-    if rg is not None and isinstance(rg, int | float):
-        parts.append(f"Revenue growth ~{round(float(rg) * 100, 1)}%")
-    if pm is not None and isinstance(pm, int | float):
-        parts.append(f"Profit margin ~{round(float(pm) * 100, 1)}%")
-    return "; ".join(parts) if parts else "Fundamental fields limited in current data pull."
+    """
+    Provide institutional-grade fundamental narrative.
+    
+    Uses narrative_builder to convert fundamental data into premium language.
+    """
+    return build_fundamental_narrative(info)
 
 
 def describe_risk(info: dict[str, Any], tech: dict[str, Any]) -> str:
-    beta = info.get("beta")
-    btxt = f"Beta ~{round(float(beta), 2)}" if isinstance(beta, int | float) else "Beta unavailable"
-    sig = tech.get("signal") or "neutral"
-    return f"{btxt}; technical stance {sig}."
+    """
+    Provide institutional-grade risk narrative.
+    
+    Uses narrative_builder to convert risk factors into premium language.
+    """
+    confidence = tech.get("confidence", 0.0)
+    return build_risk_narrative(info, tech, confidence)
+
+
+def describe_confidence(confidence_data: dict[str, Any]) -> str:
+    """
+    Describe multi-factor confidence breakdown.
+    
+    Shows how technical, fundamental, sentiment, and macro factors
+    combine to create final confidence score.
+    """
+    if not confidence_data:
+        return "Confidence analysis unavailable."
+    
+    final = confidence_data.get("final_confidence", 0.0)
+    label = confidence_data.get("confidence_label", "unknown")
+    components = confidence_data.get("components", {})
+    
+    if not components:
+        return f"Overall confidence: {label} ({round(final * 100)}%)"
+    
+    parts = [f"Overall confidence: {label} ({round(final * 100)}%)"]
+    
+    # Component breakdown
+    tech = components.get("technical", 0.0)
+    fund = components.get("fundamental", 0.0)
+    sent = components.get("sentiment", 0.0)
+    macro = components.get("macro", 0.0)
+    
+    parts.append(f"Technical: {round(tech * 100)}%")
+    parts.append(f"Fundamental: {round(fund * 100)}%")
+    parts.append(f"Sentiment: {round(sent * 100)}%")
+    parts.append(f"Macro: {round(macro * 100)}%")
+    
+    # Confidence interpretation
+    if final >= 0.7:
+        parts.append("(High confidence: multiple factors aligned)")
+    elif final >= 0.55:
+        parts.append("(Moderate confidence: mixed signals)")
+    else:
+        parts.append("(Low confidence: weak or conflicting signals)")
+    
+    return "; ".join(parts)

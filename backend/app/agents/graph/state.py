@@ -17,6 +17,8 @@ class AgentState(TypedDict, total=False):
     technical_data: dict[str, dict]
     sentiment_data: dict[str, dict]
     risk_data: dict[str, dict]
+    confidence_data: dict[str, dict]
+    macro_context: dict[str, dict]
 
     portfolio: dict
     summary: dict
