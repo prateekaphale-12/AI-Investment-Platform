@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
+from loguru import logger
 
 from app.services.llm_service import get_available_providers, LLMProvider
 from app.services.auth_service import get_current_user
@@ -80,24 +81,27 @@ async def get_llm_settings(
     current_user: dict = Depends(get_current_user)
 ):
     """Get user's current LLM settings"""
-    settings = await get_user_llm_settings(current_user["id"])
-    
-    if not settings:
-        # No settings saved yet
+    try:
+        settings = await get_user_llm_settings(current_user["id"])
+        
+        if not settings or not settings.get("provider"):
+            # No settings saved yet
+            return {
+                "provider": "",
+                "model": "",
+                "has_api_key": False
+            }
+        
+        return {
+            "provider": settings.get("provider", ""),
+            "model": settings.get("model", ""),
+            "has_api_key": settings.get("has_api_key", False)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get LLM settings: {e}")
+        # Return empty settings instead of error
         return {
             "provider": "",
             "model": "",
-            "has_api_key": False,
-            "settings": {}
+            "has_api_key": False
         }
-    
-    # Get the first (and only) provider from settings
-    provider_name = list(settings.keys())[0]
-    provider_config = settings[provider_name]
-    
-    return {
-        "provider": provider_name,
-        "model": provider_config.get("model", ""),
-        "has_api_key": provider_config.get("has_api_key", False),
-        "settings": settings
-    }

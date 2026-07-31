@@ -49,7 +49,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
       const host = window.location.host; // includes hostname:port
       return `${protocol}//${host}/api/v1/ws/market`;
     })(),
-    autoConnect = true,
+    autoConnect = false, // Changed default to false to prevent errors when WebSocket endpoint doesn't exist
     reconnectInterval = 3000,
     maxReconnectAttempts = 10,
   } = options;

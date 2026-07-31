@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from difflib import SequenceMatcher
@@ -44,13 +45,29 @@ class NewsIngestionWorker:
         self.seen_articles: set = set()  # Track seen articles for deduplication
         self.max_articles_per_category = 50  # Keep last 50 articles per category
 
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        """Remove HTML tags and decode HTML entities from text"""
+        if not text:
+            return ""
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        # Decode common HTML entities
+        text = text.replace('&lt;', '<').replace('&gt;', '>')
+        text = text.replace('&amp;', '&').replace('&quot;', '"')
+        text = text.replace('&apos;', "'").replace('&#39;', "'")
+        text = text.replace('&nbsp;', ' ')
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        return text.strip()
+
     async def ingest_homepage_news(self) -> Dict[str, Any]:
         """Ingest fresh news for homepage (every 10 minutes)"""
-        logger.info("Starting homepage news ingestion")
+        logger.info("🔄 Starting homepage news ingestion")
         
         try:
             # Fetch from multiple sources
-            articles = await asyncio.gather(
+            results = await asyncio.gather(
                 self._fetch_google_news_general(),
                 self._fetch_newsapi_general(),
                 self._fetch_finnhub_general(),
@@ -59,20 +76,25 @@ class NewsIngestionWorker:
 
             # Flatten and filter exceptions
             all_articles = []
-            for result in articles:
+            for i, result in enumerate(results):
                 if isinstance(result, list):
+                    logger.info(f"  Source {i+1} returned {len(result)} articles")
                     all_articles.extend(result)
                 elif isinstance(result, Exception):
-                    logger.warning(f"News source failed: {result}")
+                    logger.warning(f"  Source {i+1} failed: {result}")
+
+            logger.info(f"📊 General: Total articles before dedup: {len(all_articles)}")
 
             # Deduplicate
             unique_articles = self._deduplicate_articles(all_articles)
+            logger.info(f"📊 General: After dedup: {len(unique_articles)}")
 
             # Sort by freshness
             unique_articles.sort(key=lambda x: x.get("published_at", ""), reverse=True)
 
             # Filter by max age (24 hours)
             fresh_articles = self._filter_by_age(unique_articles, hours=24)
+            logger.info(f"📊 General: After age filter (24h): {len(fresh_articles)}")
 
             # Cache
             await cache_set_json(
@@ -85,42 +107,49 @@ class NewsIngestionWorker:
                 ttl_seconds=600,  # 10 minutes
             )
 
-            logger.info(f"Cached {len(fresh_articles)} homepage articles")
+            logger.info(f"✅ Cached {len(fresh_articles)} homepage articles")
             return {"status": "success", "count": len(fresh_articles)}
 
         except Exception as e:
-            logger.error(f"Homepage news ingestion failed: {e}")
+            logger.error(f"❌ Homepage news ingestion failed: {e}", exc_info=True)
             return {"status": "error", "error": str(e)}
 
     async def ingest_category_news(self, category: str) -> Dict[str, Any]:
         """Ingest news for specific category (every 15 minutes)"""
-        logger.info(f"Starting {category} news ingestion")
+        logger.info(f"🔄 Starting {category} news ingestion")
 
         try:
-            # Fetch from multiple sources
-            articles = await asyncio.gather(
+            # Fetch from category-specific sources only (Google News + NewsAPI)
+            # NOTE: Finnhub free tier only supports "general" category, so we exclude it
+            # to avoid polluting category-specific news with general market news
+            results = await asyncio.gather(
                 self._fetch_google_news_category(category),
                 self._fetch_newsapi_category(category),
-                self._fetch_finnhub_category(category),
                 return_exceptions=True,
             )
 
-            # Flatten and filter exceptions
+            # Flatten results
             all_articles = []
-            for result in articles:
+            source_names = ["Google News", "NewsAPI"]
+            for i, result in enumerate(results):
                 if isinstance(result, list):
+                    logger.info(f"  {source_names[i]} returned {len(result)} articles for {category}")
                     all_articles.extend(result)
                 elif isinstance(result, Exception):
-                    logger.warning(f"News source failed for {category}: {result}")
+                    logger.warning(f"  {source_names[i]} failed for {category}: {result}")
+
+            logger.info(f"📊 {category}: Total articles before dedup: {len(all_articles)}")
 
             # Deduplicate
             unique_articles = self._deduplicate_articles(all_articles)
+            logger.info(f"📊 {category}: After dedup: {len(unique_articles)}")
 
             # Sort by freshness
             unique_articles.sort(key=lambda x: x.get("published_at", ""), reverse=True)
 
-            # Filter by max age (12 hours for trending)
-            fresh_articles = self._filter_by_age(unique_articles, hours=12)
+            # Filter by max age (24 hours for category news - increased from 12h)
+            fresh_articles = self._filter_by_age(unique_articles, hours=24)
+            logger.info(f"📊 {category}: After age filter (24h): {len(fresh_articles)}")
 
             # Cache
             cache_key = f"news:{category}"
@@ -134,11 +163,11 @@ class NewsIngestionWorker:
                 ttl_seconds=900,  # 15 minutes
             )
 
-            logger.info(f"Cached {len(fresh_articles)} {category} articles")
+            logger.info(f"✅ Cached {len(fresh_articles)} {category} articles")
             return {"status": "success", "category": category, "count": len(fresh_articles)}
 
         except Exception as e:
-            logger.error(f"{category} news ingestion failed: {e}")
+            logger.error(f"❌ {category} news ingestion failed: {e}", exc_info=True)
             return {"status": "error", "category": category, "error": str(e)}
 
     async def ingest_ticker_news(self, ticker: str) -> Dict[str, Any]:
@@ -205,12 +234,13 @@ class NewsIngestionWorker:
 
                     articles = []
                     for entry in feed.entries[:20]:
+                        summary = self._strip_html(entry.get("summary", ""))
                         articles.append({
                             "title": entry.get("title", ""),
                             "url": entry.get("link", ""),
                             "source": "Google News",
                             "published_at": self._parse_date(entry.get("published", "")),
-                            "summary": entry.get("summary", "")[:200],
+                            "summary": summary[:200] if summary else "",
                             "category": "general",
                         })
 
@@ -223,11 +253,11 @@ class NewsIngestionWorker:
     async def _fetch_google_news_category(self, category: str) -> List[Dict[str, Any]]:
         """Fetch from Google News RSS by category"""
         category_queries = {
-            "finance": "finance+banking+investment",
-            "it": "technology+software+AI",
-            "healthcare": "healthcare+pharma+biotech",
-            "energy": "energy+oil+gas",
-            "real_estate": "real+estate+property",
+            "finance": "finance+OR+banking+OR+investment+OR+stocks+OR+trading",
+            "it": "technology+OR+software+OR+AI+OR+cloud+OR+cybersecurity",
+            "healthcare": "healthcare+OR+pharma+OR+biotech+OR+medical+OR+FDA",
+            "energy": "energy+OR+oil+OR+gas+OR+renewable+OR+solar+OR+wind",
+            "real_estate": "real+estate+OR+property+OR+housing+OR+REIT",
         }
 
         query = category_queries.get(category, category)
@@ -245,12 +275,13 @@ class NewsIngestionWorker:
 
                     articles = []
                     for entry in feed.entries[:20]:
+                        summary = self._strip_html(entry.get("summary", ""))
                         articles.append({
                             "title": entry.get("title", ""),
                             "url": entry.get("link", ""),
                             "source": "Google News",
                             "published_at": self._parse_date(entry.get("published", "")),
-                            "summary": entry.get("summary", "")[:200],
+                            "summary": summary[:200] if summary else "",
                             "category": category,
                         })
 
@@ -311,11 +342,11 @@ class NewsIngestionWorker:
             return []
 
         category_queries = {
-            "finance": "finance banking investment",
-            "it": "technology software AI",
-            "healthcare": "healthcare pharma biotech",
-            "energy": "energy oil gas",
-            "real_estate": "real estate property",
+            "finance": "finance OR banking OR investment OR stocks OR trading",
+            "it": "technology OR software OR AI OR cloud OR cybersecurity",
+            "healthcare": "healthcare OR pharma OR biotech OR medical OR FDA",
+            "energy": "energy OR oil OR gas OR renewable OR solar OR wind",
+            "real_estate": "real estate OR property OR housing OR REIT",
         }
 
         query = category_queries.get(category, category)
@@ -557,8 +588,8 @@ class NewsIngestionWorker:
                 existing_title = existing.get("title", "").lower()
                 similarity = SequenceMatcher(None, title, existing_title).ratio()
 
-                # If 80%+ similar, consider duplicate
-                if similarity > 0.8:
+                # If 90%+ similar, consider duplicate (increased from 80% to be less aggressive)
+                if similarity > 0.9:
                     is_duplicate = True
                     break
 
