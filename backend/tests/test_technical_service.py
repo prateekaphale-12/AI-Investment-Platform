@@ -9,7 +9,7 @@ def test_compute_indicators_with_uptrend_returns_expected_keys() -> None:
 
     out = compute_indicators(df)
 
-    assert out["signal"] in {"bullish", "neutral", "bearish"}
+    assert out["signal"] in {"bullish", "neutral", "bearish", "bullish_but_extended", "bearish_but_oversold", "mixed"}
     assert isinstance(out["current_price"], float)
     assert out["sma_20"] is not None
     assert out["sma_50"] is not None

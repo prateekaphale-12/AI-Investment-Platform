@@ -1,4 +1,4 @@
-"""Register / login / me — integration against real app + SQLite via TestClient."""
+"""Register / login / me — integration against real app + PostgreSQL via TestClient."""
 
 from __future__ import annotations
 
@@ -7,19 +7,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    """Isolated SQLite so tests don't fight a dev server's data/app.db (or another test worker)."""
-    import app.config as cfg
-
-    monkeypatch.setattr(cfg.settings, "database_path", tmp_path / "auth_test.sqlite")
-    monkeypatch.setattr(cfg.settings, "database_url", "")
-    # Ensure fresh settings are read by init_db / get_connection.
-    from app.main import app
-
-    with TestClient(app) as c:
-        yield c
+# Client fixture is now provided by conftest.py
 
 
 def test_register_login_me_flow(client: TestClient) -> None:
