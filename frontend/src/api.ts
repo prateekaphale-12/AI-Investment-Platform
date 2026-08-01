@@ -110,6 +110,15 @@ export async function login(email: string, password: string) {
   return data;
 }
 
+export async function logout() {
+  try {
+    await api.post("/api/v1/auth/logout");
+  } catch (error) {
+    // If logout fails (e.g., token already invalid), continue anyway
+    console.warn("Logout request failed:", error);
+  }
+}
+
 export async function me() {
   const { data } = await api.get<{ id: string; email: string }>("/api/v1/auth/me");
   return data;

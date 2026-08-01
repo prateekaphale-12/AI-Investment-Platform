@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { login, me, register, setToken, type ApiUser } from "../api";
+import { login, logout as apiLogout, me, register, setToken, type ApiUser } from "../api";
 
 interface AuthContextType {
   user: ApiUser | null;
@@ -7,7 +7,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   doLogin: (email: string, password: string) => Promise<void>;
   doRegister: (email: string, password: string) => Promise<void>;
-  doLogout: () => void;
+  doLogout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -35,7 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user);
   }
 
-  function doLogout() {
+  async function doLogout() {
+    // Call backend logout endpoint to blacklist token
+    await apiLogout();
+    // Clear local state
     setToken(null);
     setUser(null);
   }
