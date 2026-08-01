@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover
 from app.api.router import api_router
 from app.config import settings
 from app.db.init_db import init_db
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.services.snapshot_service import generate_daily_snapshot
 from app.services.news_ingestion_service import get_ingestion_worker
 from app.utils.logger import setup_logging
@@ -140,6 +141,14 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+# Add rate limiting middleware (must be added before CORS)
+app.add_middleware(
+    RateLimitMiddleware,
+    max_requests=5,  # 5 requests
+    window_seconds=60,  # per minute
+    paths=["/api/v1/auth/login", "/api/v1/auth/register"],  # Only rate limit auth endpoints
+)
 
 app.add_middleware(
     CORSMiddleware,
